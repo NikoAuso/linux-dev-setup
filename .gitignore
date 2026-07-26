@@ -1,0 +1,8 @@
+# Log generati dagli script di setup
+*.log
+
+# Cartelle di backup create localmente
+apt-sources-cleanup-*/
+
+# Worktree git per task (convenzione locale)
+worktrees/

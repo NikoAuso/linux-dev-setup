@@ -1,0 +1,385 @@
+#!/bin/bash
+
+# ─────────────────────────────────────────────
+#  SETUP AMBIENTE DI SVILUPPO — UBUNTU
+#  Le parti comuni con Fedora sono in file separati (composer.sh, phpenv.sh, …)
+#  richiamati con 'bash <parte>.sh'. Esegui con: bash setup-dev-ubuntu.sh
+# ─────────────────────────────────────────────
+
+set -euo pipefail
+
+if [ "$EUID" -eq 0 ]; then
+    echo "Non eseguire questo script come root. Usa un utente normale con sudo."
+    exit 1
+fi
+
+SETUP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+COMMON_DIR="$SETUP_DIR/common"
+if [ ! -f "$COMMON_DIR/lib.sh" ]; then
+    echo "common/lib.sh non trovato accanto a questo script." >&2
+    exit 1
+fi
+# shellcheck source=common/lib.sh
+source "$COMMON_DIR/lib.sh"
+
+# Esegue un file-parte comune dalla cartella common/
+part() { bash "$COMMON_DIR/$1" "${@:2}"; }
+
+# Logging: salva tutto l'output (stdout+stderr) in un file con timestamp
+LOG_FILE="$SETUP_DIR/setup-ubuntu-$(date +%Y%m%d_%H%M%S).log"
+exec > >(tee "$LOG_FILE") 2>&1
+info "Log completo dell'esecuzione in $LOG_FILE"
+
+keep_sudo_alive
+backup_bashrc
+
+# ── AGGIORNAMENTO SISTEMA ─────────────────────
+step "Aggiornamento sistema"
+sudo apt update && sudo apt upgrade -y
+ok "Sistema aggiornato"
+
+# ── STRUMENTI BASE ────────────────────────────
+step "Strumenti base"
+sudo apt install -y \
+    git curl wget unzip zip tar \
+    htop btop \
+    vim neovim \
+    build-essential \
+    openssl \
+    ca-certificates gnupg
+
+# fastfetch (sostituto moderno di neofetch, rimosso in Ubuntu 24.04+)
+sudo apt install -y fastfetch 2>/dev/null || sudo apt install -y neofetch 2>/dev/null || true
+
+ok "Strumenti base installati"
+
+# ── LIBRERIE DI SISTEMA ───────────────────────
+step "Librerie di sistema e dipendenze comuni"
+
+sudo apt install -y software-properties-common
+
+sudo apt install -y \
+    libffi-dev \
+    zlib1g-dev \
+    libbz2-dev \
+    libreadline-dev \
+    libncurses-dev \
+    libsqlite3-dev \
+    libpq-dev \
+    libsodium-dev \
+    libgmp-dev \
+    libtool \
+    autoconf \
+    automake \
+    pkg-config \
+    patch \
+    patchutils \
+    gettext \
+    xclip \
+    xsel \
+    imagemagick \
+    libmagickwand-dev \
+    libssl-dev \
+    libxml2-dev \
+    libcurl4-openssl-dev \
+    libonig-dev \
+    libzip-dev \
+    libwebp-dev \
+    libjpeg-dev \
+    libpng-dev \
+    libfreetype6-dev
+
+# libfuse2 — Ubuntu 22.04 usa libfuse2, Ubuntu 24.04+ usa libfuse2t64
+sudo apt install -y libfuse2 2>/dev/null || sudo apt install -y libfuse2t64 2>/dev/null || true
+
+# Redis
+sudo apt install -y redis-server
+sudo systemctl enable --now redis-server
+
+ok "Librerie di sistema, ImageMagick e Redis installati"
+
+# ── TERMINALE (Starship + Tmux + Nerd Font) ───
+step "Terminale (Starship + Tmux + Nerd Font)"
+if [ -f "$COMMON_DIR/setup-terminal.sh" ]; then
+    bash "$COMMON_DIR/setup-terminal.sh" || info "setup-terminal.sh non completato, proseguo"
+else
+    info "common/setup-terminal.sh non trovato: passo saltato"
+fi
+ok "Terminale configurato"
+
+# ── PHP ───────────────────────────────────────
+step "PHP + estensioni (versione di default dei repo Ubuntu)"
+sudo apt install -y \
+    php php-cli php-fpm php-common \
+    php-mbstring php-xml php-curl php-zip \
+    php-gd php-intl php-bcmath \
+    php-mysql php-pgsql \
+    php-xdebug php-phpdbg \
+    php-soap php-redis php-imagick \
+    php-bz2 php-sqlite3
+
+# OPcache: pacchetto a sé sulle vecchie Ubuntu, già nel core da PHP 8.5
+# (dove 'php-opcache' non ha candidato e farebbe abortire apt)
+sudo apt install -y php-opcache 2>/dev/null || true
+ok "PHP installato"
+
+part composer.sh
+part phpenv.sh
+part php-tools.sh
+part node.sh
+
+# ── PYTHON ───────────────────────────────────
+step "Python 3 + pip"
+sudo apt install -y python3 python3-pip python3-venv python3-dev
+
+# pipx: su Ubuntu 24.04+ pip3 install --user è bloccato (PEP 668), si usa apt
+sudo apt install -y pipx 2>/dev/null || pip3 install --user pipx --break-system-packages 2>/dev/null || pip3 install --user pipx
+
+ok "Python 3 installato"
+
+# ── JAVA (OpenJDK 25 LTS) ────────────────────
+step "Java 25 (OpenJDK)"
+sudo apt install -y openjdk-25-jdk openjdk-25-jre 2>/dev/null \
+    || sudo apt install -y default-jdk
+part java-home.sh
+ok "Java installato"
+
+# ── MYSQL ────────────────────────────────────
+step "MySQL Server"
+sudo apt install -y mysql-server mysql-client
+sudo systemctl enable --now mysql
+ok "MySQL installato e avviato"
+info "Esegui 'sudo mysql_secure_installation' per proteggere l'installazione"
+
+# ── POSTGRESQL ────────────────────────────────
+step "PostgreSQL"
+sudo apt install -y postgresql postgresql-client postgresql-contrib
+sudo systemctl enable --now postgresql
+ok "PostgreSQL installato e avviato"
+info "Accedi con: sudo -u postgres psql"
+
+# ── DOCKER ───────────────────────────────────
+step "Docker + Docker Compose"
+sudo install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+    | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+sudo chmod a+r /etc/apt/keyrings/docker.gpg
+
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
+https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
+    | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+sudo apt update
+sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+sudo systemctl enable --now docker
+sudo usermod -aG docker "$USER"
+ok "Docker installato"
+info "Riavvia la sessione per usare Docker senza sudo"
+
+# ── APACHE2 ───────────────────────────────────
+step "Apache2"
+sudo apt install -y apache2
+sudo systemctl enable --now apache2
+sudo usermod -aG www-data "$USER"
+
+# Abilita i moduli più usati
+sudo a2enmod rewrite headers ssl deflate
+sudo systemctl restart apache2
+ok "Apache2 installato e configurato"
+
+# ── PHPMYADMIN ────────────────────────────────
+step "phpMyAdmin"
+# Precompila le risposte per evitare prompt interattivi.
+# La password dell'utente di controllo interno di phpMyAdmin è generata a caso
+# (non viene mai digitata: il login avviene con le credenziali MySQL), così non
+# resta un segreto debole hardcoded nel repo. admin-pass è la password di root
+# MySQL: su un'installazione locale root usa auth_socket, quindi resta vuota.
+PMA_CTRL_PASS="$(openssl rand -base64 18)"
+echo "phpmyadmin phpmyadmin/dbconfig-install boolean true" | sudo debconf-set-selections
+echo "phpmyadmin phpmyadmin/app-password-confirm password $PMA_CTRL_PASS" | sudo debconf-set-selections
+echo "phpmyadmin phpmyadmin/mysql/admin-pass password " | sudo debconf-set-selections
+echo "phpmyadmin phpmyadmin/mysql/app-pass password $PMA_CTRL_PASS" | sudo debconf-set-selections
+echo "phpmyadmin phpmyadmin/reconfigure-webserver multiselect apache2" | sudo debconf-set-selections
+
+sudo apt install -y phpmyadmin
+sudo phpenmod mbstring
+sudo systemctl restart apache2
+ok "phpMyAdmin installato — accessibile su http://localhost/phpmyadmin"
+info "Login con credenziali MySQL. root usa auth_socket: imposta una password root con 'sudo mysql_secure_installation' o crea un utente dedicato per accedere"
+
+part mailpit.sh nogroup
+
+# ── CLI TOOLS ────────────────────────────────
+step "Tool CLI moderni"
+
+sudo apt install -y \
+    bat \
+    fzf \
+    ripgrep \
+    fd-find \
+    jq \
+    httpie
+
+# eza — nei repo ufficiali Ubuntu da 24.04
+sudo apt install -y eza
+
+# git-delta — non nei repo ufficiali Ubuntu, va installato dal .deb di GitHub
+if ! command -v delta &>/dev/null; then
+    # Versione pinnata + checksum: aggiornali insieme quando bumpi la release.
+    DELTA_VERSION="0.19.2"
+    DELTA_SHA256="ea4f0222950ee750a3d38dd80d03bce4cee07a3f63928fc47548383bcaf23093"
+    curl -fsSLo /tmp/delta.deb "https://github.com/dandavison/delta/releases/download/${DELTA_VERSION}/git-delta_${DELTA_VERSION}_amd64.deb"
+    verify_sha256 /tmp/delta.deb "$DELTA_SHA256"
+    sudo dpkg -i /tmp/delta.deb
+    rm /tmp/delta.deb
+fi
+
+# Su Ubuntu 'bat' si chiama 'batcat' — creiamo il symlink
+if command -v batcat &>/dev/null && ! command -v bat &>/dev/null; then
+    sudo ln -sf /usr/bin/batcat /usr/local/bin/bat
+fi
+
+# Su Ubuntu 'fd' si chiama 'fdfind' — creiamo il symlink
+if command -v fdfind &>/dev/null && ! command -v fd &>/dev/null; then
+    sudo ln -sf /usr/bin/fdfind /usr/local/bin/fd
+fi
+
+part lazygit.sh
+
+# Configura fzf nel .bashrc
+if ! grep -q "fzf" "$HOME/.bashrc"; then
+    echo '[ -f /usr/share/doc/fzf/examples/key-bindings.bash ] && source /usr/share/doc/fzf/examples/key-bindings.bash' >> "$HOME/.bashrc"
+    echo '[ -f /usr/share/doc/fzf/examples/completion.bash ] && source /usr/share/doc/fzf/examples/completion.bash' >> "$HOME/.bashrc"
+fi
+
+part cli-aliases.sh
+
+ok "bat, eza, fzf, ripgrep, fd, jq, httpie, lazygit, git-delta installati"
+
+# ── VS CODE ───────────────────────────────────
+step "Visual Studio Code"
+sudo install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://packages.microsoft.com/keys/microsoft.asc \
+    | sudo gpg --dearmor -o /etc/apt/keyrings/microsoft.gpg
+sudo chmod a+r /etc/apt/keyrings/microsoft.gpg
+
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/microsoft.gpg] \
+https://packages.microsoft.com/repos/code stable main" \
+    | sudo tee /etc/apt/sources.list.d/vscode.list > /dev/null
+
+sudo apt update
+sudo apt install -y code
+ok "VS Code installato"
+
+part vscode-extensions.sh
+
+# ── MKCERT ────────────────────────────────────
+sudo apt install -y libnss3-tools
+part mkcert.sh
+
+# ── GITHUB CLI ────────────────────────────────
+step "GitHub CLI (gh)"
+curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+    | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+sudo chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+    | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+sudo apt update
+sudo apt install -y gh
+ok "GitHub CLI installato — autenticati con: gh auth login"
+
+# ── DIRENV ────────────────────────────────────
+step "direnv (variabili d'ambiente per progetto)"
+sudo apt install -y direnv
+if ! grep -q "direnv hook" "$HOME/.bashrc"; then
+    echo 'eval "$(direnv hook bash)"' >> "$HOME/.bashrc"
+fi
+ok "direnv installato — crea un file .envrc nella cartella del progetto"
+
+part git-config.sh
+part dev-aliases.sh
+
+# ── APP DESKTOP & EXTRA ───────────────────────
+step "App desktop ed extra (Chrome, Postman, Telegram, VLC, MEGAsync, GPaste, git-filter-repo)"
+
+# VLC, GPaste, git-filter-repo — nei repo Ubuntu
+sudo apt install -y vlc gpaste-2 git-filter-repo
+
+# Google Chrome — repo ufficiale Google
+if ! command -v google-chrome &>/dev/null; then
+    sudo install -m 0755 -d /etc/apt/keyrings
+    curl -fsSL https://dl.google.com/linux/linux_signing_key.pub \
+        | sudo gpg --dearmor -o /etc/apt/keyrings/google-chrome.gpg
+    sudo chmod a+r /etc/apt/keyrings/google-chrome.gpg
+    echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-chrome.gpg] https://dl.google.com/linux/chrome/deb/ stable main" \
+        | sudo tee /etc/apt/sources.list.d/google-chrome.list > /dev/null
+    sudo apt update
+    sudo apt install -y google-chrome-stable
+fi
+
+# Postman e Telegram — via snap
+if command -v snap &>/dev/null; then
+    snap list postman &>/dev/null || sudo snap install postman
+    snap list telegram-desktop &>/dev/null || sudo snap install telegram-desktop
+else
+    info "snap non disponibile: Postman e Telegram saltati"
+fi
+
+# MEGAsync — .deb ufficiale per la versione di Ubuntu in uso
+if ! command -v megasync &>/dev/null; then
+    MEGA_VER="$(. /etc/os-release && echo "$VERSION_ID")"
+    if curl -fsSLo /tmp/megasync.deb "https://mega.nz/linux/repo/xUbuntu_${MEGA_VER}/amd64/megasync-xUbuntu_${MEGA_VER}_amd64.deb"; then
+        sudo apt install -y /tmp/megasync.deb
+        rm -f /tmp/megasync.deb
+    else
+        MEGA_SKIPPED=1
+        info "Pacchetto MEGAsync per Ubuntu ${MEGA_VER} non disponibile, saltato (scaricalo da mega.nz/desktop)"
+    fi
+fi
+
+ok "App desktop ed extra installate"
+
+part app-folders.sh
+
+part verify.sh apache2 mysql postgresql docker redis-server mailpit
+
+# ── RIEPILOGO FINALE ─────────────────────────
+echo ""
+echo -e "${GREEN}═══════════════════════════════════════${NC}"
+echo -e "${GREEN}  Setup completato con successo!${NC}"
+echo -e "${GREEN}═══════════════════════════════════════${NC}"
+echo ""
+echo -e "  ${CYAN}Installato:${NC}"
+echo -e "  ${GREEN}✓${NC} Starship + Tmux (su bash)"
+echo -e "  ${GREEN}✓${NC} PHP + estensioni + Composer"
+echo -e "  ${GREEN}✓${NC} phpenv + php-build (gestore versioni PHP)"
+echo -e "  ${GREEN}✓${NC} php-cs-fixer, PHPStan, Pint, Infection, PHPUnit"
+echo -e "  ${GREEN}✓${NC} Node.js LTS (nvm)"
+echo -e "  ${GREEN}✓${NC} Python 3 + pip"
+echo -e "  ${GREEN}✓${NC} Java (OpenJDK 25, fallback default-jdk)"
+echo -e "  ${GREEN}✓${NC} MySQL Server"
+echo -e "  ${GREEN}✓${NC} Docker + Docker Compose"
+echo -e "  ${GREEN}✓${NC} bat, eza, fzf, ripgrep, fd, jq, httpie, lazygit, git-delta"
+echo -e "  ${GREEN}✓${NC} Apache2 + moduli (rewrite, ssl, headers)"
+echo -e "  ${GREEN}✓${NC} phpMyAdmin (http://localhost/phpmyadmin)"
+echo -e "  ${GREEN}✓${NC} Mailpit — UI http://localhost:8025 | SMTP :1025"
+echo -e "  ${GREEN}✓${NC} VS Code + 21 estensioni"
+echo -e "  ${GREEN}✓${NC} PostgreSQL"
+echo -e "  ${GREEN}✓${NC} mkcert (HTTPS locale)"
+echo -e "  ${GREEN}✓${NC} GitHub CLI (gh)"
+echo -e "  ${GREEN}✓${NC} direnv (env per progetto)"
+if [ "${MEGA_SKIPPED:-0}" = "1" ]; then
+    echo -e "  ${GREEN}✓${NC} Chrome, Postman, Telegram, VLC, GPaste, git-filter-repo ${YELLOW}(MEGAsync saltato)${NC}"
+else
+    echo -e "  ${GREEN}✓${NC} Chrome, Postman, Telegram, VLC, MEGAsync, GPaste, git-filter-repo"
+fi
+echo -e "  ${GREEN}✓${NC} Librerie di sistema + ImageMagick + Redis"
+echo -e "  ${GREEN}✓${NC} Menu applicazioni organizzato in cartelle per scopo"
+echo -e "  ${GREEN}✓${NC} Git configurato con delta"
+echo ""
+echo -e "  ${YELLOW}Azioni post-riavvio:${NC}"
+echo -e "  • sudo mysql_secure_installation"
+echo -e "  • phpenv install <versione> per aggiungere versioni PHP extra"
+echo ""
+echo -e "  ${CYAN}Riavvia il sistema per applicare tutte le modifiche.${NC}"
+echo ""
