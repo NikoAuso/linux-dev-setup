@@ -19,6 +19,24 @@ step() { echo -e "\n${CYAN}─────────────────�
 ok()   { echo -e "${GREEN}  ✓ $1${NC}"; }
 info() { echo -e "  ${YELLOW}→${NC} $1"; }
 
+# Riepilogo finale: ogni blocco completato registra la propria voce, così il
+# riepilogo resta veritiero anche quando qualcosa è disattivato via WITH_*.
+SUMMARY=()
+done_item() { SUMMARY+=("$1"); }
+print_summary() {
+    echo ""
+    echo -e "${GREEN}═══════════════════════════════════════${NC}"
+    echo -e "${GREEN}  Setup completato con successo!${NC}"
+    echo -e "${GREEN}═══════════════════════════════════════${NC}"
+    echo ""
+    echo -e "  ${CYAN}Installato:${NC}"
+    local item
+    for item in "${SUMMARY[@]}"; do
+        echo -e "  ${GREEN}✓${NC} $item"
+    done
+    echo ""
+}
+
 backup_if_exists() {
     if [ -f "$1" ]; then
         cp "$1" "$1.bak.$(date +%Y%m%d_%H%M%S)"

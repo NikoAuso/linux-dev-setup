@@ -4,6 +4,8 @@
 #  SETUP AMBIENTE DI SVILUPPO — FEDORA (44+)
 #  Le parti comuni con Ubuntu sono in file separati (composer.sh, phpenv.sh, …)
 #  richiamati con 'bash <parte>.sh'. Esegui con: bash setup-dev-fedora.sh
+#  Cosa installare si sceglie con le opzioni (vedi common/options.sh, --help):
+#      bash setup-dev-fedora.sh --no-postgres --no-desktop
 # ─────────────────────────────────────────────
 
 set -euo pipefail
@@ -21,6 +23,8 @@ if [ ! -f "$COMMON_DIR/lib.sh" ]; then
 fi
 # shellcheck source=common/lib.sh
 source "$COMMON_DIR/lib.sh"
+# shellcheck source=common/options.sh
+source "$COMMON_DIR/options.sh" "$@"
 
 # Esegue un file-parte comune dalla cartella common/
 part() { bash "$COMMON_DIR/$1" "${@:2}"; }
@@ -90,20 +94,25 @@ sudo dnf install -y \
     libpng-devel \
     freetype-devel
 
-# Redis
-sudo dnf install -y redis
-sudo systemctl enable --now redis
+ok "Librerie di sistema e ImageMagick installati"
+done_item "Librerie di sistema + ImageMagick"
 
-ok "Librerie di sistema, ImageMagick e Redis installati"
+# ── REDIS ────────────────────────────────────
+if [ "$WITH_REDIS" = 1 ]; then
+    step "Redis"
+    sudo dnf install -y redis
+    sudo systemctl enable --now redis
+    ok "Redis installato e avviato"
+    done_item "Redis"
+fi
 
 # ── TERMINALE (Starship + Tmux + Nerd Font) ───
-step "Terminale (Starship + Tmux + Nerd Font)"
-if [ -f "$COMMON_DIR/setup-terminal.sh" ]; then
-    bash "$COMMON_DIR/setup-terminal.sh" || info "setup-terminal.sh non completato, proseguo"
-else
-    info "common/setup-terminal.sh non trovato: passo saltato"
+if [ "$WITH_TERMINAL" = 1 ]; then
+    step "Terminale (Starship + Tmux + Nerd Font)"
+    part setup-terminal.sh || info "setup-terminal.sh non completato, proseguo"
+    ok "Terminale configurato"
+    done_item "Starship + Tmux (su bash)"
 fi
-ok "Terminale configurato"
 
 # ── PHP ───────────────────────────────────────
 # Fedora 44 include PHP 8.4 con tutte le estensioni nei repo base (pacchetti
@@ -118,112 +127,186 @@ sudo dnf install -y \
     php-dbg php-pecl-xdebug \
     php-soap php-pecl-redis \
     php-bz2
+
+# imagick a parte: il pacchetto Fedora è compilato per il PHP dei repo base, e su
+# un sistema con PHP da Remi la dipendenza php(api) non si risolve facendo fallire
+# l'INTERA transazione (quindi tutte le estensioni). Variante -im7 = build Remi.
+sudo dnf install -y php-pecl-imagick 2>/dev/null \
+    || sudo dnf install -y php-pecl-imagick-im7 2>/dev/null \
+    || info "php-pecl-imagick non disponibile per questo PHP, saltato"
 # Su Fedora non esiste mod_php: httpd esegue PHP via php-fpm (proxy fcgi).
 # Senza questo, phpMyAdmin e i progetti sotto Apache non eseguono PHP.
 sudo systemctl enable --now php-fpm
 ok "PHP installato"
+done_item "PHP + estensioni (repo Fedora)"
+
+part php-ini-dev.sh
+done_item "php.ini di sviluppo + Xdebug (127.0.0.1:9003)"
 
 part composer.sh
+done_item "Composer"
 
-# ── DIPENDENZE COMPILAZIONE PHP (php-build) ───
-# Necessarie a phpenv per compilare PHP da sorgente; alcune non sono già nelle
-# librerie di sistema sopra (libtidy-devel, libxslt-devel).
-step "Dipendenze compilazione PHP (php-build)"
-sudo dnf install -y \
-    bzip2-devel libxml2-devel libcurl-devel \
-    libjpeg-turbo-devel libpng-devel libwebp-devel \
-    freetype-devel oniguruma-devel libzip-devel \
-    sqlite-devel readline-devel libtidy-devel \
-    libxslt-devel
-ok "Dipendenze compilazione PHP installate"
+# ── PHPENV ────────────────────────────────────
+if [ "$WITH_PHPENV" = 1 ]; then
+    # Dipendenze necessarie a phpenv per compilare PHP da sorgente; alcune non
+    # sono già nelle librerie di sistema sopra (libtidy-devel, libxslt-devel).
+    step "Dipendenze compilazione PHP (php-build)"
+    sudo dnf install -y \
+        bzip2-devel libxml2-devel libcurl-devel \
+        libjpeg-turbo-devel libpng-devel libwebp-devel \
+        freetype-devel oniguruma-devel libzip-devel \
+        sqlite-devel readline-devel libtidy-devel \
+        libxslt-devel
+    ok "Dipendenze compilazione PHP installate"
 
-part phpenv.sh
+    part phpenv.sh
+    done_item "phpenv + php-build (gestore versioni PHP)"
+fi
+
 part php-tools.sh
-part node.sh
+if [ "$WITH_LARAVEL" = 1 ]; then
+    done_item "php-cs-fixer, PHPStan, Infection, PHPUnit, Pint, laravel/installer"
+else
+    done_item "php-cs-fixer, PHPStan, Infection, PHPUnit"
+fi
+
+# ── NODE ─────────────────────────────────────
+if [ "$WITH_NODE" = 1 ]; then
+    part node.sh
+    done_item "Node.js LTS (nvm)"
+fi
 
 # ── PYTHON ───────────────────────────────────
-step "Python 3 + pip"
-# Su Fedora venv è incluso in python3 (non esiste il pacchetto python3-venv)
-sudo dnf install -y python3 python3-pip python3-devel
+if [ "$WITH_PYTHON" = 1 ]; then
+    step "Python 3 + pip"
+    # Su Fedora venv è incluso in python3 (non esiste il pacchetto python3-venv)
+    sudo dnf install -y python3 python3-pip python3-devel
 
-# pipx: su Fedora recente pip3 install --user è bloccato (PEP 668), si usa dnf
-sudo dnf install -y pipx 2>/dev/null || pip3 install --user pipx --break-system-packages 2>/dev/null || pip3 install --user pipx
+    # pipx: su Fedora recente pip3 install --user è bloccato (PEP 668), si usa dnf
+    sudo dnf install -y pipx 2>/dev/null || pip3 install --user pipx --break-system-packages 2>/dev/null || pip3 install --user pipx
+    pipx ensurepath >/dev/null 2>&1 || true
 
-ok "Python 3 installato"
+    # Client CLI dei database, isolati da pipx (hanno dipendenze Python proprie)
+    if [ "$WITH_MYSQL" = 1 ]; then
+        pipx install mycli || info "mycli non installato"
+    fi
+    if [ "$WITH_POSTGRES" = 1 ]; then
+        pipx install pgcli || info "pgcli non installato"
+    fi
+
+    ok "Python 3 installato"
+    done_item "Python 3 + pip + pipx (mycli/pgcli)"
+fi
 
 # ── JAVA (OpenJDK 25 LTS) ────────────────────
-step "Java 25 (OpenJDK)"
-sudo dnf install -y java-25-openjdk java-25-openjdk-devel 2>/dev/null \
-    || sudo dnf install -y java-latest-openjdk java-latest-openjdk-devel
-part java-home.sh
-ok "Java 25 installato"
+if [ "$WITH_JAVA" = 1 ]; then
+    step "Java 25 (OpenJDK)"
+    sudo dnf install -y java-25-openjdk java-25-openjdk-devel 2>/dev/null \
+        || sudo dnf install -y java-latest-openjdk java-latest-openjdk-devel
+    part java-home.sh
+    ok "Java 25 installato"
+    done_item "Java (OpenJDK 25, fallback java-latest)"
+fi
 
 # ── MYSQL ────────────────────────────────────
-step "MySQL Server"
-sudo dnf install -y mysql-server mysql
-sudo systemctl enable --now mysqld
-ok "MySQL installato e avviato"
-info "Esegui 'sudo mysql_secure_installation' per proteggere l'installazione"
+if [ "$WITH_MYSQL" = 1 ]; then
+    step "MySQL Server"
+    sudo dnf install -y mysql-server mysql
+    sudo systemctl enable --now mysqld
+    ok "MySQL installato e avviato"
+    info "Esegui 'sudo mysql_secure_installation' per proteggere l'installazione"
+    done_item "MySQL Server"
+fi
 
 # ── POSTGRESQL ────────────────────────────────
-step "PostgreSQL"
-sudo dnf install -y postgresql postgresql-server postgresql-contrib
-# initdb solo se la data dir è vuota: initdb rifiuta una cartella non vuota,
-# quindi controllare l'assenza di PG_VERSION non basta (una init interrotta la
-# lascia popolata a metà). Se serve ripartire da una init rotta:
-#   sudo rm -rf /var/lib/pgsql/data/* && sudo postgresql-setup --initdb
-if [ -z "$(sudo sh -c 'ls -A /var/lib/pgsql/data 2>/dev/null')" ]; then
-    sudo postgresql-setup --initdb
+if [ "$WITH_POSTGRES" = 1 ]; then
+    step "PostgreSQL"
+    sudo dnf install -y postgresql postgresql-server postgresql-contrib
+    # initdb solo se la data dir è vuota: initdb rifiuta una cartella non vuota,
+    # quindi controllare l'assenza di PG_VERSION non basta (una init interrotta la
+    # lascia popolata a metà). Se serve ripartire da una init rotta:
+    #   sudo rm -rf /var/lib/pgsql/data/* && sudo postgresql-setup --initdb
+    if [ -z "$(sudo sh -c 'ls -A /var/lib/pgsql/data 2>/dev/null')" ]; then
+        sudo postgresql-setup --initdb
+    fi
+    sudo systemctl enable --now postgresql
+    ok "PostgreSQL installato e avviato"
+    info "Accedi con: sudo -u postgres psql"
+    done_item "PostgreSQL"
 fi
-sudo systemctl enable --now postgresql
-ok "PostgreSQL installato e avviato"
-info "Accedi con: sudo -u postgres psql"
 
 # ── DOCKER ───────────────────────────────────
-step "Docker + Docker Compose"
-# Scarica il .repo direttamente: compatibile sia con DNF4 che con DNF5
-# (in DNF5 'config-manager --add-repo' non esiste più)
-sudo curl -fsSL https://download.docker.com/linux/fedora/docker-ce.repo \
-    -o /etc/yum.repos.d/docker-ce.repo
-sudo dnf install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-sudo systemctl enable --now docker
-sudo usermod -aG docker "$USER"
-ok "Docker installato"
-info "Riavvia la sessione per usare Docker senza sudo"
+if [ "$WITH_DOCKER" = 1 ]; then
+    step "Docker + Docker Compose"
+    # Scarica il .repo direttamente: compatibile sia con DNF4 che con DNF5
+    # (in DNF5 'config-manager --add-repo' non esiste più)
+    sudo curl -fsSL https://download.docker.com/linux/fedora/docker-ce.repo \
+        -o /etc/yum.repos.d/docker-ce.repo
+    sudo dnf install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+    # Rotazione dei log dei container: senza questa, un container loquace riempie
+    # /var/lib/docker fino a saturare il disco. Non tocca una config esistente.
+    if [ ! -f /etc/docker/daemon.json ]; then
+        sudo install -d /etc/docker
+        sudo tee /etc/docker/daemon.json > /dev/null << 'EOF'
+{
+  "log-driver": "json-file",
+  "log-opts": { "max-size": "10m", "max-file": "3" }
+}
+EOF
+    fi
+
+    sudo systemctl enable --now docker
+    sudo systemctl restart docker
+    sudo usermod -aG docker "$USER"
+    ok "Docker installato"
+    info "Riavvia la sessione per usare Docker senza sudo"
+    done_item "Docker + Docker Compose (log rotation 10m x3)"
+fi
 
 # ── APACHE (httpd) ────────────────────────────
-step "Apache (httpd)"
-sudo dnf install -y httpd mod_ssl
-sudo systemctl enable --now httpd
-sudo usermod -aG apache "$USER"
+if [ "$WITH_APACHE" = 1 ]; then
+    step "Apache (httpd)"
+    sudo dnf install -y httpd mod_ssl
+    sudo systemctl enable --now httpd
+    sudo usermod -aG apache "$USER"
 
-sudo setsebool -P httpd_can_network_connect 1
-# Nessuna apertura del firewall: lo sviluppo locale usa il loopback (localhost),
-# che non passa dal firewall. Aprire http/https esporrebbe i siti dev e phpMyAdmin
-# a tutta la LAN. Per abilitare di proposito i test da altri dispositivi:
-#   sudo firewall-cmd --permanent --add-service=http --add-service=https
-#   sudo firewall-cmd --reload
+    sudo setsebool -P httpd_can_network_connect 1
+    # Nessuna apertura del firewall: lo sviluppo locale usa il loopback (localhost),
+    # che non passa dal firewall. Aprire http/https esporrebbe i siti dev e phpMyAdmin
+    # a tutta la LAN. Per abilitare di proposito i test da altri dispositivi:
+    #   sudo firewall-cmd --permanent --add-service=http --add-service=https
+    #   sudo firewall-cmd --reload
 
-# Abilita .htaccess (AllowOverride All) SOLO per la DocumentRoot, con un drop-in
-# in conf.d. Evita il 'sed' globale su httpd.conf che allargava l'override anche
-# a <Directory /> (root del filesystem), indebolendo tutto il server.
-# rewrite/headers/ssl/deflate sono già caricati di default via conf.modules.d.
-sudo tee /etc/httpd/conf.d/dev-allowoverride.conf > /dev/null << 'EOF'
+    # Abilita .htaccess (AllowOverride All) SOLO per la DocumentRoot, con un drop-in
+    # in conf.d. Evita il 'sed' globale su httpd.conf che allargava l'override anche
+    # a <Directory /> (root del filesystem), indebolendo tutto il server.
+    # rewrite/headers/ssl/deflate sono già caricati di default via conf.modules.d.
+    sudo tee /etc/httpd/conf.d/dev-allowoverride.conf > /dev/null << 'EOF'
 <Directory "/var/www/html">
     AllowOverride All
 </Directory>
 EOF
-sudo systemctl restart httpd
-ok "Apache (httpd) installato e configurato"
+    sudo systemctl restart httpd
+    ok "Apache (httpd) installato e configurato"
+    done_item "Apache (httpd) + mod_rewrite + mod_ssl"
+fi
 
 # ── PHPMYADMIN ────────────────────────────────
-step "phpMyAdmin"
-sudo dnf install -y phpMyAdmin
-sudo systemctl restart httpd
-ok "phpMyAdmin installato — accessibile su http://localhost/phpMyAdmin"
-info "Modifica /etc/phpMyAdmin/config.inc.php per configurare l'accesso"
+if [ "$WITH_PHPMYADMIN" = 1 ]; then
+    step "phpMyAdmin"
+    sudo dnf install -y phpMyAdmin
+    sudo systemctl restart httpd
+    ok "phpMyAdmin installato — accessibile su http://localhost/phpMyAdmin"
+    info "Modifica /etc/phpMyAdmin/config.inc.php per configurare l'accesso"
+    done_item "phpMyAdmin (http://localhost/phpMyAdmin)"
+fi
 
-part mailpit.sh nobody
+# ── MAILPIT ──────────────────────────────────
+if [ "$WITH_MAILPIT" = 1 ]; then
+    part mailpit.sh nobody
+    done_item "Mailpit — UI http://localhost:8025 | SMTP :1025"
+fi
 
 # ── CLI TOOLS ────────────────────────────────
 step "Tool CLI moderni"
@@ -238,7 +321,8 @@ sudo dnf install -y \
     fd-find \
     jq \
     httpie \
-    git-delta
+    git-delta \
+    ShellCheck
 
 part lazygit.sh
 
@@ -250,12 +334,19 @@ fi
 
 part cli-aliases.sh
 
-ok "bat, eza, fzf, ripgrep, fd, jq, httpie, lazygit, git-delta installati"
+ok "bat, eza, fzf, ripgrep, fd, jq, httpie, lazygit, git-delta, shellcheck installati"
+done_item "bat, eza, fzf, ripgrep, fd, jq, httpie, lazygit, git-delta, shellcheck"
+
+if [ "$WITH_ACT" = 1 ]; then
+    part act.sh
+    done_item "act (GitHub Actions in locale)"
+fi
 
 # ── VS CODE ───────────────────────────────────
-step "Visual Studio Code"
-sudo rpm --import https://packages.microsoft.com/keys/microsoft.asc
-sudo tee /etc/yum.repos.d/vscode.repo > /dev/null << 'EOF'
+if [ "$WITH_VSCODE" = 1 ]; then
+    step "Visual Studio Code"
+    sudo rpm --import https://packages.microsoft.com/keys/microsoft.asc
+    sudo tee /etc/yum.repos.d/vscode.repo > /dev/null << 'EOF'
 [code]
 name=Visual Studio Code
 baseurl=https://packages.microsoft.com/yumrepos/vscode
@@ -263,14 +354,23 @@ enabled=1
 gpgcheck=1
 gpgkey=https://packages.microsoft.com/keys/microsoft.asc
 EOF
-sudo dnf install -y code
-ok "VS Code installato"
+    sudo dnf install -y code
+    ok "VS Code installato"
 
-part vscode-extensions.sh
+    part vscode-extensions.sh
+    done_item "VS Code + estensioni"
+fi
+
+# ── JETBRAINS TOOLBOX ─────────────────────────
+if [ "$WITH_JETBRAINS" = 1 ]; then
+    part jetbrains-toolbox.sh
+    done_item "JetBrains Toolbox"
+fi
 
 # ── MKCERT ────────────────────────────────────
 sudo dnf install -y nss-tools
 part mkcert.sh
+done_item "mkcert (HTTPS locale)"
 
 # ── GITHUB CLI ────────────────────────────────
 step "GitHub CLI (gh)"
@@ -278,6 +378,7 @@ sudo curl -fsSL https://cli.github.com/packages/rpm/gh-cli.repo \
     -o /etc/yum.repos.d/gh-cli.repo
 sudo dnf install -y gh
 ok "GitHub CLI installato — autenticati con: gh auth login"
+done_item "GitHub CLI (gh)"
 
 # ── DIRENV ────────────────────────────────────
 step "direnv (variabili d'ambiente per progetto)"
@@ -286,24 +387,28 @@ if ! grep -q "direnv hook" "$HOME/.bashrc"; then
     echo 'eval "$(direnv hook bash)"' >> "$HOME/.bashrc"
 fi
 ok "direnv installato — crea un file .envrc nella cartella del progetto"
+done_item "direnv (env per progetto)"
 
 part git-config.sh
+done_item "Git configurato con delta"
+
 part dev-aliases.sh
 
 # ── APP DESKTOP & EXTRA ───────────────────────
-step "App desktop ed extra (Chrome, Postman, Telegram, VLC, MEGAsync, GPaste, git-filter-repo)"
+if [ "$WITH_DESKTOP" = 1 ]; then
+    step "App desktop ed extra (Chrome, Postman, Telegram, VLC, MEGAsync, GPaste, git-filter-repo)"
 
-# git-filter-repo + GPaste — nei repo Fedora
-sudo dnf install -y git-filter-repo gpaste gnome-shell-extension-gpaste 2>/dev/null \
-    || sudo dnf install -y git-filter-repo gpaste
+    # git-filter-repo + GPaste — nei repo Fedora
+    sudo dnf install -y git-filter-repo gpaste gnome-shell-extension-gpaste 2>/dev/null \
+        || sudo dnf install -y git-filter-repo gpaste
 
-# VLC — richiede RPM Fusion (repo non-free/free non incluso di default in Fedora)
-sudo dnf install -y "https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm" 2>/dev/null || true
-sudo dnf install -y vlc || info "VLC non installato (verifica RPM Fusion)"
+    # VLC — richiede RPM Fusion (repo non-free/free non incluso di default in Fedora)
+    sudo dnf install -y "https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm" 2>/dev/null || true
+    sudo dnf install -y vlc || info "VLC non installato (verifica RPM Fusion)"
 
-# Google Chrome — repo ufficiale Google
-if ! command -v google-chrome &>/dev/null; then
-    sudo tee /etc/yum.repos.d/google-chrome.repo > /dev/null << 'EOF'
+    # Google Chrome — repo ufficiale Google
+    if ! command -v google-chrome &>/dev/null; then
+        sudo tee /etc/yum.repos.d/google-chrome.repo > /dev/null << 'EOF'
 [google-chrome]
 name=google-chrome
 baseurl=https://dl.google.com/linux/chrome/rpm/stable/x86_64
@@ -311,75 +416,62 @@ enabled=1
 gpgcheck=1
 gpgkey=https://dl.google.com/linux/linux_signing_key.pub
 EOF
-    sudo dnf install -y google-chrome-stable
-fi
-
-# Telegram — nei repo Fedora, fallback su Flatpak
-sudo dnf install -y telegram-desktop 2>/dev/null || TELEGRAM_FLATPAK=1
-
-# Postman — non nei repo Fedora: via Flatpak (Flathub)
-sudo dnf install -y flatpak
-flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-flatpak install -y --noninteractive flathub com.getpostman.Postman || info "Postman (Flatpak) saltato"
-if [ "${TELEGRAM_FLATPAK:-0}" = "1" ]; then
-    flatpak install -y --noninteractive flathub org.telegram.desktop || info "Telegram saltato"
-fi
-
-# MEGAsync — RPM ufficiale per la versione di Fedora in uso
-if ! command -v megasync &>/dev/null; then
-    MEGA_VER="$(rpm -E %fedora)"
-    if curl -fsSLo /tmp/megasync.rpm "https://mega.nz/linux/repo/Fedora_${MEGA_VER}/x86_64/megasync-Fedora_${MEGA_VER}_x86_64.rpm"; then
-        sudo dnf install -y /tmp/megasync.rpm
-        rm -f /tmp/megasync.rpm
-    else
-        MEGA_SKIPPED=1
-        info "Pacchetto MEGAsync per Fedora ${MEGA_VER} non disponibile, saltato (scaricalo da mega.nz/desktop)"
+        sudo dnf install -y google-chrome-stable
     fi
+
+    # Telegram — nei repo Fedora, fallback su Flatpak
+    sudo dnf install -y telegram-desktop 2>/dev/null || TELEGRAM_FLATPAK=1
+
+    # Postman — non nei repo Fedora: via Flatpak (Flathub)
+    sudo dnf install -y flatpak
+    flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+    flatpak install -y --noninteractive flathub com.getpostman.Postman || info "Postman (Flatpak) saltato"
+    if [ "${TELEGRAM_FLATPAK:-0}" = "1" ]; then
+        flatpak install -y --noninteractive flathub org.telegram.desktop || info "Telegram saltato"
+    fi
+
+    # MEGAsync — RPM ufficiale per la versione di Fedora in uso
+    if ! command -v megasync &>/dev/null; then
+        MEGA_VER="$(rpm -E %fedora)"
+        if curl -fsSLo /tmp/megasync.rpm "https://mega.nz/linux/repo/Fedora_${MEGA_VER}/x86_64/megasync-Fedora_${MEGA_VER}_x86_64.rpm"; then
+            sudo dnf install -y /tmp/megasync.rpm
+            rm -f /tmp/megasync.rpm
+        else
+            MEGA_SKIPPED=1
+            info "Pacchetto MEGAsync per Fedora ${MEGA_VER} non disponibile, saltato (scaricalo da mega.nz/desktop)"
+        fi
+    fi
+
+    ok "App desktop ed extra installate"
+    if [ "${MEGA_SKIPPED:-0}" = "1" ]; then
+        done_item "Chrome, Postman, Telegram, VLC, GPaste, git-filter-repo ${YELLOW}(MEGAsync saltato)${NC}"
+    else
+        done_item "Chrome, Postman, Telegram, VLC, MEGAsync, GPaste, git-filter-repo"
+    fi
+
+    part app-folders.sh
+    done_item "Menu applicazioni organizzato in cartelle per scopo"
 fi
 
-ok "App desktop ed extra installate"
-
-part app-folders.sh
-
-part verify.sh php-fpm httpd mysqld postgresql docker redis mailpit
+# ── VERIFICA ─────────────────────────────────
+VERIFY_SERVICES=(php-fpm)
+if [ "$WITH_APACHE" = 1 ];   then VERIFY_SERVICES+=(httpd); fi
+if [ "$WITH_MYSQL" = 1 ];    then VERIFY_SERVICES+=(mysqld); fi
+if [ "$WITH_POSTGRES" = 1 ]; then VERIFY_SERVICES+=(postgresql); fi
+if [ "$WITH_DOCKER" = 1 ];   then VERIFY_SERVICES+=(docker); fi
+if [ "$WITH_REDIS" = 1 ];    then VERIFY_SERVICES+=(redis); fi
+if [ "$WITH_MAILPIT" = 1 ];  then VERIFY_SERVICES+=(mailpit); fi
+part verify.sh "${VERIFY_SERVICES[@]}"
 
 # ── RIEPILOGO FINALE ─────────────────────────
-echo ""
-echo -e "${GREEN}═══════════════════════════════════════${NC}"
-echo -e "${GREEN}  Setup completato con successo!${NC}"
-echo -e "${GREEN}═══════════════════════════════════════${NC}"
-echo ""
-echo -e "  ${CYAN}Installato:${NC}"
-echo -e "  ${GREEN}✓${NC} Starship + Tmux (su bash)"
-echo -e "  ${GREEN}✓${NC} PHP + estensioni (repo Fedora) + Composer"
-echo -e "  ${GREEN}✓${NC} phpenv + php-build (gestore versioni PHP)"
-echo -e "  ${GREEN}✓${NC} php-cs-fixer, PHPStan, Pint, Infection, PHPUnit"
-echo -e "  ${GREEN}✓${NC} Node.js LTS (nvm)"
-echo -e "  ${GREEN}✓${NC} Python 3 + pip"
-echo -e "  ${GREEN}✓${NC} Java (OpenJDK 25, fallback java-latest)"
-echo -e "  ${GREEN}✓${NC} MySQL Server"
-echo -e "  ${GREEN}✓${NC} Docker + Docker Compose"
-echo -e "  ${GREEN}✓${NC} bat, eza, fzf, ripgrep, fd, jq, httpie, lazygit, git-delta"
-echo -e "  ${GREEN}✓${NC} Apache (httpd) + mod_rewrite + mod_ssl"
-echo -e "  ${GREEN}✓${NC} phpMyAdmin (http://localhost/phpMyAdmin)"
-echo -e "  ${GREEN}✓${NC} Mailpit — UI http://localhost:8025 | SMTP :1025"
-echo -e "  ${GREEN}✓${NC} VS Code + 21 estensioni"
-echo -e "  ${GREEN}✓${NC} PostgreSQL"
-echo -e "  ${GREEN}✓${NC} mkcert (HTTPS locale)"
-echo -e "  ${GREEN}✓${NC} GitHub CLI (gh)"
-echo -e "  ${GREEN}✓${NC} direnv (env per progetto)"
-if [ "${MEGA_SKIPPED:-0}" = "1" ]; then
-    echo -e "  ${GREEN}✓${NC} Chrome, Postman, Telegram, VLC, GPaste, git-filter-repo ${YELLOW}(MEGAsync saltato)${NC}"
-else
-    echo -e "  ${GREEN}✓${NC} Chrome, Postman, Telegram, VLC, MEGAsync, GPaste, git-filter-repo"
-fi
-echo -e "  ${GREEN}✓${NC} Librerie di sistema + ImageMagick + Redis"
-echo -e "  ${GREEN}✓${NC} Menu applicazioni organizzato in cartelle per scopo"
-echo -e "  ${GREEN}✓${NC} Git configurato con delta"
-echo ""
+print_summary
 echo -e "  ${YELLOW}Azioni post-riavvio:${NC}"
-echo -e "  • sudo mysql_secure_installation"
-echo -e "  • phpenv install <versione> per aggiungere versioni PHP extra"
+if [ "$WITH_MYSQL" = 1 ]; then
+    echo -e "  • sudo mysql_secure_installation"
+fi
+if [ "$WITH_PHPENV" = 1 ]; then
+    echo -e "  • phpenv install <versione> per aggiungere versioni PHP extra"
+fi
 echo ""
 echo -e "  ${CYAN}Riavvia il sistema per applicare tutte le modifiche.${NC}"
 echo ""

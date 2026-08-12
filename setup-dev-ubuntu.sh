@@ -4,6 +4,8 @@
 #  SETUP AMBIENTE DI SVILUPPO — UBUNTU
 #  Le parti comuni con Fedora sono in file separati (composer.sh, phpenv.sh, …)
 #  richiamati con 'bash <parte>.sh'. Esegui con: bash setup-dev-ubuntu.sh
+#  Cosa installare si sceglie con le opzioni (vedi common/options.sh, --help):
+#      bash setup-dev-ubuntu.sh --no-postgres --no-desktop
 # ─────────────────────────────────────────────
 
 set -euo pipefail
@@ -21,6 +23,8 @@ if [ ! -f "$COMMON_DIR/lib.sh" ]; then
 fi
 # shellcheck source=common/lib.sh
 source "$COMMON_DIR/lib.sh"
+# shellcheck source=common/options.sh
+source "$COMMON_DIR/options.sh" "$@"
 
 # Esegue un file-parte comune dalla cartella common/
 part() { bash "$COMMON_DIR/$1" "${@:2}"; }
@@ -92,20 +96,25 @@ sudo apt install -y \
 # libfuse2 — Ubuntu 22.04 usa libfuse2, Ubuntu 24.04+ usa libfuse2t64
 sudo apt install -y libfuse2 2>/dev/null || sudo apt install -y libfuse2t64 2>/dev/null || true
 
-# Redis
-sudo apt install -y redis-server
-sudo systemctl enable --now redis-server
+ok "Librerie di sistema e ImageMagick installati"
+done_item "Librerie di sistema + ImageMagick"
 
-ok "Librerie di sistema, ImageMagick e Redis installati"
+# ── REDIS ────────────────────────────────────
+if [ "$WITH_REDIS" = 1 ]; then
+    step "Redis"
+    sudo apt install -y redis-server
+    sudo systemctl enable --now redis-server
+    ok "Redis installato e avviato"
+    done_item "Redis"
+fi
 
 # ── TERMINALE (Starship + Tmux + Nerd Font) ───
-step "Terminale (Starship + Tmux + Nerd Font)"
-if [ -f "$COMMON_DIR/setup-terminal.sh" ]; then
-    bash "$COMMON_DIR/setup-terminal.sh" || info "setup-terminal.sh non completato, proseguo"
-else
-    info "common/setup-terminal.sh non trovato: passo saltato"
+if [ "$WITH_TERMINAL" = 1 ]; then
+    step "Terminale (Starship + Tmux + Nerd Font)"
+    part setup-terminal.sh || info "setup-terminal.sh non completato, proseguo"
+    ok "Terminale configurato"
+    done_item "Starship + Tmux (su bash)"
 fi
-ok "Terminale configurato"
 
 # ── PHP ───────────────────────────────────────
 step "PHP + estensioni (versione di default dei repo Ubuntu)"
@@ -122,92 +131,182 @@ sudo apt install -y \
 # (dove 'php-opcache' non ha candidato e farebbe abortire apt)
 sudo apt install -y php-opcache 2>/dev/null || true
 ok "PHP installato"
+done_item "PHP + estensioni"
+
+part php-ini-dev.sh
+done_item "php.ini di sviluppo + Xdebug (127.0.0.1:9003)"
 
 part composer.sh
-part phpenv.sh
+done_item "Composer"
+
+# ── PHPENV ────────────────────────────────────
+if [ "$WITH_PHPENV" = 1 ]; then
+    # Dipendenze necessarie a phpenv per compilare PHP da sorgente; tidy e xslt
+    # non sono già nelle librerie di sistema sopra.
+    step "Dipendenze compilazione PHP (php-build)"
+    sudo apt install -y \
+        libbz2-dev libxml2-dev libcurl4-openssl-dev \
+        libjpeg-dev libpng-dev libwebp-dev \
+        libfreetype6-dev libonig-dev libzip-dev \
+        libsqlite3-dev libreadline-dev libtidy-dev \
+        libxslt1-dev
+    ok "Dipendenze compilazione PHP installate"
+
+    part phpenv.sh
+    done_item "phpenv + php-build (gestore versioni PHP)"
+fi
+
 part php-tools.sh
-part node.sh
+if [ "$WITH_LARAVEL" = 1 ]; then
+    done_item "php-cs-fixer, PHPStan, Infection, PHPUnit, Pint, laravel/installer"
+else
+    done_item "php-cs-fixer, PHPStan, Infection, PHPUnit"
+fi
+
+# ── NODE ─────────────────────────────────────
+if [ "$WITH_NODE" = 1 ]; then
+    part node.sh
+    done_item "Node.js LTS (nvm)"
+fi
 
 # ── PYTHON ───────────────────────────────────
-step "Python 3 + pip"
-sudo apt install -y python3 python3-pip python3-venv python3-dev
+if [ "$WITH_PYTHON" = 1 ]; then
+    step "Python 3 + pip"
+    sudo apt install -y python3 python3-pip python3-venv python3-dev
 
-# pipx: su Ubuntu 24.04+ pip3 install --user è bloccato (PEP 668), si usa apt
-sudo apt install -y pipx 2>/dev/null || pip3 install --user pipx --break-system-packages 2>/dev/null || pip3 install --user pipx
+    # pipx: su Ubuntu 24.04+ pip3 install --user è bloccato (PEP 668), si usa apt
+    sudo apt install -y pipx 2>/dev/null || pip3 install --user pipx --break-system-packages 2>/dev/null || pip3 install --user pipx
+    pipx ensurepath >/dev/null 2>&1 || true
 
-ok "Python 3 installato"
+    # Client CLI dei database, isolati da pipx (hanno dipendenze Python proprie)
+    if [ "$WITH_MYSQL" = 1 ]; then
+        pipx install mycli || info "mycli non installato"
+    fi
+    if [ "$WITH_POSTGRES" = 1 ]; then
+        pipx install pgcli || info "pgcli non installato"
+    fi
+
+    ok "Python 3 installato"
+    done_item "Python 3 + pip + pipx (mycli/pgcli)"
+fi
 
 # ── JAVA (OpenJDK 25 LTS) ────────────────────
-step "Java 25 (OpenJDK)"
-sudo apt install -y openjdk-25-jdk openjdk-25-jre 2>/dev/null \
-    || sudo apt install -y default-jdk
-part java-home.sh
-ok "Java installato"
+if [ "$WITH_JAVA" = 1 ]; then
+    step "Java 25 (OpenJDK)"
+    sudo apt install -y openjdk-25-jdk openjdk-25-jre 2>/dev/null \
+        || sudo apt install -y default-jdk
+    part java-home.sh
+    ok "Java installato"
+    done_item "Java (OpenJDK 25, fallback default-jdk)"
+fi
 
 # ── MYSQL ────────────────────────────────────
-step "MySQL Server"
-sudo apt install -y mysql-server mysql-client
-sudo systemctl enable --now mysql
-ok "MySQL installato e avviato"
-info "Esegui 'sudo mysql_secure_installation' per proteggere l'installazione"
+if [ "$WITH_MYSQL" = 1 ]; then
+    step "MySQL Server"
+    sudo apt install -y mysql-server mysql-client
+    sudo systemctl enable --now mysql
+    ok "MySQL installato e avviato"
+    info "Esegui 'sudo mysql_secure_installation' per proteggere l'installazione"
+    done_item "MySQL Server"
+fi
 
 # ── POSTGRESQL ────────────────────────────────
-step "PostgreSQL"
-sudo apt install -y postgresql postgresql-client postgresql-contrib
-sudo systemctl enable --now postgresql
-ok "PostgreSQL installato e avviato"
-info "Accedi con: sudo -u postgres psql"
+if [ "$WITH_POSTGRES" = 1 ]; then
+    step "PostgreSQL"
+    sudo apt install -y postgresql postgresql-client postgresql-contrib
+    sudo systemctl enable --now postgresql
+    ok "PostgreSQL installato e avviato"
+    info "Accedi con: sudo -u postgres psql"
+    done_item "PostgreSQL"
+fi
 
 # ── DOCKER ───────────────────────────────────
-step "Docker + Docker Compose"
-sudo install -m 0755 -d /etc/apt/keyrings
-curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
-    | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-sudo chmod a+r /etc/apt/keyrings/docker.gpg
+if [ "$WITH_DOCKER" = 1 ]; then
+    step "Docker + Docker Compose"
+    sudo install -m 0755 -d /etc/apt/keyrings
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+        | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+    sudo chmod a+r /etc/apt/keyrings/docker.gpg
 
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
 https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
-    | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+        | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
 
-sudo apt update
-sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-sudo systemctl enable --now docker
-sudo usermod -aG docker "$USER"
-ok "Docker installato"
-info "Riavvia la sessione per usare Docker senza sudo"
+    sudo apt update
+    sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+    # Rotazione dei log dei container: senza questa, un container loquace riempie
+    # /var/lib/docker fino a saturare il disco. Non tocca una config esistente.
+    if [ ! -f /etc/docker/daemon.json ]; then
+        sudo install -d /etc/docker
+        sudo tee /etc/docker/daemon.json > /dev/null << 'EOF'
+{
+  "log-driver": "json-file",
+  "log-opts": { "max-size": "10m", "max-file": "3" }
+}
+EOF
+    fi
+
+    sudo systemctl enable --now docker
+    sudo systemctl restart docker
+    sudo usermod -aG docker "$USER"
+    ok "Docker installato"
+    info "Riavvia la sessione per usare Docker senza sudo"
+    done_item "Docker + Docker Compose (log rotation 10m x3)"
+fi
 
 # ── APACHE2 ───────────────────────────────────
-step "Apache2"
-sudo apt install -y apache2
-sudo systemctl enable --now apache2
-sudo usermod -aG www-data "$USER"
+if [ "$WITH_APACHE" = 1 ]; then
+    step "Apache2"
+    sudo apt install -y apache2
+    sudo systemctl enable --now apache2
+    sudo usermod -aG www-data "$USER"
 
-# Abilita i moduli più usati
-sudo a2enmod rewrite headers ssl deflate
-sudo systemctl restart apache2
-ok "Apache2 installato e configurato"
+    # Abilita i moduli più usati
+    sudo a2enmod rewrite headers ssl deflate
+
+    # Abilita .htaccess (AllowOverride All) SOLO per la DocumentRoot, con un file di
+    # conf dedicato invece di un 'sed' su apache2.conf: il default Ubuntu per
+    # /var/www è AllowOverride None, quindi senza questo i .htaccess sono ignorati.
+    sudo tee /etc/apache2/conf-available/dev-allowoverride.conf > /dev/null << 'EOF'
+<Directory "/var/www/html">
+    AllowOverride All
+</Directory>
+EOF
+    sudo a2enconf dev-allowoverride
+    sudo systemctl restart apache2
+    ok "Apache2 installato e configurato"
+    done_item "Apache2 + moduli (rewrite, ssl, headers)"
+fi
 
 # ── PHPMYADMIN ────────────────────────────────
-step "phpMyAdmin"
-# Precompila le risposte per evitare prompt interattivi.
-# La password dell'utente di controllo interno di phpMyAdmin è generata a caso
-# (non viene mai digitata: il login avviene con le credenziali MySQL), così non
-# resta un segreto debole hardcoded nel repo. admin-pass è la password di root
-# MySQL: su un'installazione locale root usa auth_socket, quindi resta vuota.
-PMA_CTRL_PASS="$(openssl rand -base64 18)"
-echo "phpmyadmin phpmyadmin/dbconfig-install boolean true" | sudo debconf-set-selections
-echo "phpmyadmin phpmyadmin/app-password-confirm password $PMA_CTRL_PASS" | sudo debconf-set-selections
-echo "phpmyadmin phpmyadmin/mysql/admin-pass password " | sudo debconf-set-selections
-echo "phpmyadmin phpmyadmin/mysql/app-pass password $PMA_CTRL_PASS" | sudo debconf-set-selections
-echo "phpmyadmin phpmyadmin/reconfigure-webserver multiselect apache2" | sudo debconf-set-selections
+if [ "$WITH_PHPMYADMIN" = 1 ]; then
+    step "phpMyAdmin"
+    # Precompila le risposte per evitare prompt interattivi.
+    # La password dell'utente di controllo interno di phpMyAdmin è generata a caso
+    # (non viene mai digitata: il login avviene con le credenziali MySQL), così non
+    # resta un segreto debole hardcoded nel repo. admin-pass è la password di root
+    # MySQL: su un'installazione locale root usa auth_socket, quindi resta vuota.
+    PMA_CTRL_PASS="$(openssl rand -base64 18)"
+    echo "phpmyadmin phpmyadmin/dbconfig-install boolean true" | sudo debconf-set-selections
+    echo "phpmyadmin phpmyadmin/app-password-confirm password $PMA_CTRL_PASS" | sudo debconf-set-selections
+    echo "phpmyadmin phpmyadmin/mysql/admin-pass password " | sudo debconf-set-selections
+    echo "phpmyadmin phpmyadmin/mysql/app-pass password $PMA_CTRL_PASS" | sudo debconf-set-selections
+    echo "phpmyadmin phpmyadmin/reconfigure-webserver multiselect apache2" | sudo debconf-set-selections
 
-sudo apt install -y phpmyadmin
-sudo phpenmod mbstring
-sudo systemctl restart apache2
-ok "phpMyAdmin installato — accessibile su http://localhost/phpmyadmin"
-info "Login con credenziali MySQL. root usa auth_socket: imposta una password root con 'sudo mysql_secure_installation' o crea un utente dedicato per accedere"
+    sudo apt install -y phpmyadmin
+    sudo phpenmod mbstring
+    sudo systemctl restart apache2
+    ok "phpMyAdmin installato — accessibile su http://localhost/phpmyadmin"
+    info "Login con credenziali MySQL. root usa auth_socket: imposta una password root con 'sudo mysql_secure_installation' o crea un utente dedicato per accedere"
+    done_item "phpMyAdmin (http://localhost/phpmyadmin)"
+fi
 
-part mailpit.sh nogroup
+# ── MAILPIT ──────────────────────────────────
+if [ "$WITH_MAILPIT" = 1 ]; then
+    part mailpit.sh nogroup
+    done_item "Mailpit — UI http://localhost:8025 | SMTP :1025"
+fi
 
 # ── CLI TOOLS ────────────────────────────────
 step "Tool CLI moderni"
@@ -218,7 +317,8 @@ sudo apt install -y \
     ripgrep \
     fd-find \
     jq \
-    httpie
+    httpie \
+    shellcheck
 
 # eza — nei repo ufficiali Ubuntu da 24.04
 sudo apt install -y eza
@@ -254,28 +354,44 @@ fi
 
 part cli-aliases.sh
 
-ok "bat, eza, fzf, ripgrep, fd, jq, httpie, lazygit, git-delta installati"
+ok "bat, eza, fzf, ripgrep, fd, jq, httpie, lazygit, git-delta, shellcheck installati"
+done_item "bat, eza, fzf, ripgrep, fd, jq, httpie, lazygit, git-delta, shellcheck"
+
+if [ "$WITH_ACT" = 1 ]; then
+    part act.sh
+    done_item "act (GitHub Actions in locale)"
+fi
 
 # ── VS CODE ───────────────────────────────────
-step "Visual Studio Code"
-sudo install -m 0755 -d /etc/apt/keyrings
-curl -fsSL https://packages.microsoft.com/keys/microsoft.asc \
-    | sudo gpg --dearmor -o /etc/apt/keyrings/microsoft.gpg
-sudo chmod a+r /etc/apt/keyrings/microsoft.gpg
+if [ "$WITH_VSCODE" = 1 ]; then
+    step "Visual Studio Code"
+    sudo install -m 0755 -d /etc/apt/keyrings
+    curl -fsSL https://packages.microsoft.com/keys/microsoft.asc \
+        | sudo gpg --dearmor -o /etc/apt/keyrings/microsoft.gpg
+    sudo chmod a+r /etc/apt/keyrings/microsoft.gpg
 
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/microsoft.gpg] \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/microsoft.gpg] \
 https://packages.microsoft.com/repos/code stable main" \
-    | sudo tee /etc/apt/sources.list.d/vscode.list > /dev/null
+        | sudo tee /etc/apt/sources.list.d/vscode.list > /dev/null
 
-sudo apt update
-sudo apt install -y code
-ok "VS Code installato"
+    sudo apt update
+    sudo apt install -y code
+    ok "VS Code installato"
 
-part vscode-extensions.sh
+    part vscode-extensions.sh
+    done_item "VS Code + estensioni"
+fi
+
+# ── JETBRAINS TOOLBOX ─────────────────────────
+if [ "$WITH_JETBRAINS" = 1 ]; then
+    part jetbrains-toolbox.sh
+    done_item "JetBrains Toolbox"
+fi
 
 # ── MKCERT ────────────────────────────────────
 sudo apt install -y libnss3-tools
 part mkcert.sh
+done_item "mkcert (HTTPS locale)"
 
 # ── GITHUB CLI ────────────────────────────────
 step "GitHub CLI (gh)"
@@ -287,6 +403,7 @@ echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githu
 sudo apt update
 sudo apt install -y gh
 ok "GitHub CLI installato — autenticati con: gh auth login"
+done_item "GitHub CLI (gh)"
 
 # ── DIRENV ────────────────────────────────────
 step "direnv (variabili d'ambiente per progetto)"
@@ -295,91 +412,82 @@ if ! grep -q "direnv hook" "$HOME/.bashrc"; then
     echo 'eval "$(direnv hook bash)"' >> "$HOME/.bashrc"
 fi
 ok "direnv installato — crea un file .envrc nella cartella del progetto"
+done_item "direnv (env per progetto)"
 
 part git-config.sh
+done_item "Git configurato con delta"
+
 part dev-aliases.sh
 
 # ── APP DESKTOP & EXTRA ───────────────────────
-step "App desktop ed extra (Chrome, Postman, Telegram, VLC, MEGAsync, GPaste, git-filter-repo)"
+if [ "$WITH_DESKTOP" = 1 ]; then
+    step "App desktop ed extra (Chrome, Postman, Telegram, VLC, MEGAsync, GPaste, git-filter-repo)"
 
-# VLC, GPaste, git-filter-repo — nei repo Ubuntu
-sudo apt install -y vlc gpaste-2 git-filter-repo
+    # VLC, GPaste, git-filter-repo — nei repo Ubuntu
+    sudo apt install -y vlc gpaste-2 git-filter-repo
 
-# Google Chrome — repo ufficiale Google
-if ! command -v google-chrome &>/dev/null; then
-    sudo install -m 0755 -d /etc/apt/keyrings
-    curl -fsSL https://dl.google.com/linux/linux_signing_key.pub \
-        | sudo gpg --dearmor -o /etc/apt/keyrings/google-chrome.gpg
-    sudo chmod a+r /etc/apt/keyrings/google-chrome.gpg
-    echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-chrome.gpg] https://dl.google.com/linux/chrome/deb/ stable main" \
-        | sudo tee /etc/apt/sources.list.d/google-chrome.list > /dev/null
-    sudo apt update
-    sudo apt install -y google-chrome-stable
-fi
-
-# Postman e Telegram — via snap
-if command -v snap &>/dev/null; then
-    snap list postman &>/dev/null || sudo snap install postman
-    snap list telegram-desktop &>/dev/null || sudo snap install telegram-desktop
-else
-    info "snap non disponibile: Postman e Telegram saltati"
-fi
-
-# MEGAsync — .deb ufficiale per la versione di Ubuntu in uso
-if ! command -v megasync &>/dev/null; then
-    MEGA_VER="$(. /etc/os-release && echo "$VERSION_ID")"
-    if curl -fsSLo /tmp/megasync.deb "https://mega.nz/linux/repo/xUbuntu_${MEGA_VER}/amd64/megasync-xUbuntu_${MEGA_VER}_amd64.deb"; then
-        sudo apt install -y /tmp/megasync.deb
-        rm -f /tmp/megasync.deb
-    else
-        MEGA_SKIPPED=1
-        info "Pacchetto MEGAsync per Ubuntu ${MEGA_VER} non disponibile, saltato (scaricalo da mega.nz/desktop)"
+    # Google Chrome — repo ufficiale Google
+    if ! command -v google-chrome &>/dev/null; then
+        sudo install -m 0755 -d /etc/apt/keyrings
+        curl -fsSL https://dl.google.com/linux/linux_signing_key.pub \
+            | sudo gpg --dearmor -o /etc/apt/keyrings/google-chrome.gpg
+        sudo chmod a+r /etc/apt/keyrings/google-chrome.gpg
+        echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-chrome.gpg] https://dl.google.com/linux/chrome/deb/ stable main" \
+            | sudo tee /etc/apt/sources.list.d/google-chrome.list > /dev/null
+        sudo apt update
+        sudo apt install -y google-chrome-stable
     fi
+
+    # Postman e Telegram — via snap
+    if command -v snap &>/dev/null; then
+        snap list postman &>/dev/null || sudo snap install postman
+        snap list telegram-desktop &>/dev/null || sudo snap install telegram-desktop
+    else
+        info "snap non disponibile: Postman e Telegram saltati"
+    fi
+
+    # MEGAsync — .deb ufficiale per la versione di Ubuntu in uso
+    if ! command -v megasync &>/dev/null; then
+        MEGA_VER="$(. /etc/os-release && echo "$VERSION_ID")"
+        if curl -fsSLo /tmp/megasync.deb "https://mega.nz/linux/repo/xUbuntu_${MEGA_VER}/amd64/megasync-xUbuntu_${MEGA_VER}_amd64.deb"; then
+            sudo apt install -y /tmp/megasync.deb
+            rm -f /tmp/megasync.deb
+        else
+            MEGA_SKIPPED=1
+            info "Pacchetto MEGAsync per Ubuntu ${MEGA_VER} non disponibile, saltato (scaricalo da mega.nz/desktop)"
+        fi
+    fi
+
+    ok "App desktop ed extra installate"
+    if [ "${MEGA_SKIPPED:-0}" = "1" ]; then
+        done_item "Chrome, Postman, Telegram, VLC, GPaste, git-filter-repo ${YELLOW}(MEGAsync saltato)${NC}"
+    else
+        done_item "Chrome, Postman, Telegram, VLC, MEGAsync, GPaste, git-filter-repo"
+    fi
+
+    part app-folders.sh
+    done_item "Menu applicazioni organizzato in cartelle per scopo"
 fi
 
-ok "App desktop ed extra installate"
-
-part app-folders.sh
-
-part verify.sh apache2 mysql postgresql docker redis-server mailpit
+# ── VERIFICA ─────────────────────────────────
+VERIFY_SERVICES=()
+if [ "$WITH_APACHE" = 1 ];   then VERIFY_SERVICES+=(apache2); fi
+if [ "$WITH_MYSQL" = 1 ];    then VERIFY_SERVICES+=(mysql); fi
+if [ "$WITH_POSTGRES" = 1 ]; then VERIFY_SERVICES+=(postgresql); fi
+if [ "$WITH_DOCKER" = 1 ];   then VERIFY_SERVICES+=(docker); fi
+if [ "$WITH_REDIS" = 1 ];    then VERIFY_SERVICES+=(redis-server); fi
+if [ "$WITH_MAILPIT" = 1 ];  then VERIFY_SERVICES+=(mailpit); fi
+part verify.sh "${VERIFY_SERVICES[@]}"
 
 # ── RIEPILOGO FINALE ─────────────────────────
-echo ""
-echo -e "${GREEN}═══════════════════════════════════════${NC}"
-echo -e "${GREEN}  Setup completato con successo!${NC}"
-echo -e "${GREEN}═══════════════════════════════════════${NC}"
-echo ""
-echo -e "  ${CYAN}Installato:${NC}"
-echo -e "  ${GREEN}✓${NC} Starship + Tmux (su bash)"
-echo -e "  ${GREEN}✓${NC} PHP + estensioni + Composer"
-echo -e "  ${GREEN}✓${NC} phpenv + php-build (gestore versioni PHP)"
-echo -e "  ${GREEN}✓${NC} php-cs-fixer, PHPStan, Pint, Infection, PHPUnit"
-echo -e "  ${GREEN}✓${NC} Node.js LTS (nvm)"
-echo -e "  ${GREEN}✓${NC} Python 3 + pip"
-echo -e "  ${GREEN}✓${NC} Java (OpenJDK 25, fallback default-jdk)"
-echo -e "  ${GREEN}✓${NC} MySQL Server"
-echo -e "  ${GREEN}✓${NC} Docker + Docker Compose"
-echo -e "  ${GREEN}✓${NC} bat, eza, fzf, ripgrep, fd, jq, httpie, lazygit, git-delta"
-echo -e "  ${GREEN}✓${NC} Apache2 + moduli (rewrite, ssl, headers)"
-echo -e "  ${GREEN}✓${NC} phpMyAdmin (http://localhost/phpmyadmin)"
-echo -e "  ${GREEN}✓${NC} Mailpit — UI http://localhost:8025 | SMTP :1025"
-echo -e "  ${GREEN}✓${NC} VS Code + 21 estensioni"
-echo -e "  ${GREEN}✓${NC} PostgreSQL"
-echo -e "  ${GREEN}✓${NC} mkcert (HTTPS locale)"
-echo -e "  ${GREEN}✓${NC} GitHub CLI (gh)"
-echo -e "  ${GREEN}✓${NC} direnv (env per progetto)"
-if [ "${MEGA_SKIPPED:-0}" = "1" ]; then
-    echo -e "  ${GREEN}✓${NC} Chrome, Postman, Telegram, VLC, GPaste, git-filter-repo ${YELLOW}(MEGAsync saltato)${NC}"
-else
-    echo -e "  ${GREEN}✓${NC} Chrome, Postman, Telegram, VLC, MEGAsync, GPaste, git-filter-repo"
-fi
-echo -e "  ${GREEN}✓${NC} Librerie di sistema + ImageMagick + Redis"
-echo -e "  ${GREEN}✓${NC} Menu applicazioni organizzato in cartelle per scopo"
-echo -e "  ${GREEN}✓${NC} Git configurato con delta"
-echo ""
+print_summary
 echo -e "  ${YELLOW}Azioni post-riavvio:${NC}"
-echo -e "  • sudo mysql_secure_installation"
-echo -e "  • phpenv install <versione> per aggiungere versioni PHP extra"
+if [ "$WITH_MYSQL" = 1 ]; then
+    echo -e "  • sudo mysql_secure_installation"
+fi
+if [ "$WITH_PHPENV" = 1 ]; then
+    echo -e "  • phpenv install <versione> per aggiungere versioni PHP extra"
+fi
 echo ""
 echo -e "  ${CYAN}Riavvia il sistema per applicare tutte le modifiche.${NC}"
 echo ""

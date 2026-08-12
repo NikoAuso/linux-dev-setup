@@ -9,9 +9,18 @@ PART_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$PART_DIR/lib.sh"
 
 step "Configurazione Git globale"
-# Personalizza con i tuoi dati prima di lanciare lo script
-git config --global user.name "Il Tuo Nome"
-git config --global user.email "tua@email.com"
+
+# L'identità si imposta solo se non c'è già: un rilancio dello script su una
+# macchina configurata non deve sovrascrivere nome ed email reali.
+# Passala da fuori:  GIT_USER_NAME="Mario Rossi" GIT_USER_EMAIL=m@r.it bash …
+if ! git config --global --get user.name >/dev/null; then
+    git config --global user.name "${GIT_USER_NAME:-Il Tuo Nome}"
+fi
+if ! git config --global --get user.email >/dev/null; then
+    git config --global user.email "${GIT_USER_EMAIL:-tua@email.com}"
+fi
+info "Identità git: $(git config --global user.name) <$(git config --global user.email)>"
+
 git config --global init.defaultBranch main
 git config --global core.editor "code --wait"
 git config --global core.pager "delta"

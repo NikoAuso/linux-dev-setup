@@ -11,7 +11,8 @@ in modo **idempotente** (rilanciabile senza rompere nulla).
 
 **Linguaggi e runtime**
 - PHP + estensioni (mbstring, xml, curl, zip, gd, intl, bcmath, opcache, pdo, mysql, pgsql, xdebug, redis, imagick, soap, bz2, sqlite)
-- Composer + tool globali: php-cs-fixer, PHPStan, Pint, Infection, PHPUnit
+- `php.ini` di sviluppo pronto: Xdebug su `127.0.0.1:9003` (modo `trigger`), errori visibili, limiti alzati
+- Composer + tool globali: php-cs-fixer, PHPStan, Infection, PHPUnit (+ Pint e `laravel new` con `WITH_LARAVEL`)
 - phpenv + php-build (per compilare/gestire più versioni di PHP)
 - Node.js LTS via nvm
 - Python 3 + pip + pipx
@@ -21,19 +22,21 @@ in modo **idempotente** (rilanciabile senza rompere nulla).
 - MySQL Server
 - PostgreSQL
 - Redis
-- Docker + Docker Compose
+- Docker + Docker Compose (con rotazione dei log dei container)
 - Apache (httpd/apache2) con moduli rewrite/ssl/headers
 - phpMyAdmin
-- Mailpit (email testing locale: UI su `:8025`, SMTP su `:1025`)
+- Mailpit (email testing locale: UI su `:8025`, SMTP su `:1025`) — `mail()` di PHP ci finisce dentro
 
 **Strumenti da terminale**
 - Starship prompt + Tmux + Nerd Font (JetBrainsMono)
-- bat, eza, fzf, ripgrep, fd, jq, httpie, lazygit, git-delta
-- direnv, mkcert (HTTPS locale), GitHub CLI (`gh`)
+- bat, eza, fzf, ripgrep, fd, jq, httpie, lazygit, git-delta, shellcheck
+- direnv, mkcert (HTTPS locale), GitHub CLI (`gh`), act (GitHub Actions in locale)
+- `mycli` / `pgcli` via pipx (solo se il database corrispondente è attivo)
 - Alias per git, Docker, Laravel e i tool moderni
 
 **Applicazioni desktop**
 - VS Code + estensioni (PHP, Laravel, Docker, Python, Java, ecc.)
+- JetBrains Toolbox (PhpStorm & co.)
 - Chrome, Postman, Telegram, VLC, MEGAsync, GPaste
 - Organizzazione automatica del menu applicazioni GNOME in cartelle
 
@@ -56,8 +59,47 @@ bash setup-dev-ubuntu.sh
 bash setup-dev-fedora.sh
 ```
 
-Lo script chiede la password `sudo` una volta e la mantiene viva per tutta la durata.
-Al termine riavvia il sistema (o almeno la sessione) per applicare gruppi (docker, apache) e PATH.
+### Scegliere cosa installare
+
+Ogni blocco è attivo di default (`bash setup-dev-<distro>.sh` senza argomenti installa tutto).
+Le opzioni servono soprattutto a togliere:
+
+```bash
+bash setup-dev-fedora.sh --help          # elenco dei blocchi
+
+# solo PostgreSQL, senza app desktop né JetBrains
+bash setup-dev-fedora.sh --no-mysql --no-desktop --no-jetbrains
+
+# ambiente minimo: niente desktop, niente IDE, niente phpenv
+bash setup-dev-ubuntu.sh --no-desktop --no-vscode --no-jetbrains --no-phpenv
+```
+
+| Blocco | Cosa comprende |
+|---|---|
+| `terminal` | Starship + Tmux + Nerd Font |
+| `phpenv` | phpenv + php-build + dipendenze di compilazione |
+| `laravel` | Pint e `laravel/installer` globali |
+| `node` | Node.js LTS via nvm |
+| `python` | Python 3 + pip + pipx (mycli/pgcli) |
+| `java` | OpenJDK |
+| `mysql` | MySQL Server + mycli |
+| `postgres` | PostgreSQL + pgcli |
+| `redis` | Redis |
+| `docker` | Docker + Docker Compose |
+| `apache` | Apache |
+| `phpmyadmin` | phpMyAdmin (forzato off senza `apache` o `mysql`) |
+| `mailpit` | Mailpit + `sendmail_path` di PHP |
+| `vscode` | VS Code + estensioni |
+| `jetbrains` | JetBrains Toolbox |
+| `act` | act |
+| `desktop` | Chrome, Postman, Telegram, VLC, MEGAsync, GPaste |
+
+`--<nome>` lo include esplicitamente, `--no-<nome>` lo esclude. Le stesse scelte si possono
+passare come variabili d'ambiente `WITH_<NOME>=0` (utile negli script); la riga di comando
+ha la precedenza sull'ambiente.
+
+I default stanno in [`common/options.sh`](common/options.sh). Il riepilogo finale e
+`verify.sh` seguono gli stessi flag, quindi non segnalano come mancante ciò che hai escluso.
 
 ## Struttura
 
@@ -65,16 +107,20 @@ Al termine riavvia il sistema (o almeno la sessione) per applicare gruppi (docke
 setup-dev-ubuntu.sh    # entrypoint Ubuntu (apt)
 setup-dev-fedora.sh    # entrypoint Fedora (dnf)
 common/                # logica condivisa tra le due distro
-├── lib.sh             # helper: output colorato, backup, keepalive sudo
+├── lib.sh             # helper: output colorato, backup, keepalive sudo, riepilogo
+├── options.sh         # flag WITH_* — cosa installare
 ├── composer.sh        # Composer (con verifica checksum)
 ├── phpenv.sh          # phpenv + php-build
+├── php-ini-dev.sh     # php.ini di sviluppo + Xdebug
 ├── php-tools.sh       # tool PHP globali
 ├── node.sh            # Node.js via nvm
 ├── mailpit.sh         # Mailpit + servizio systemd
 ├── mkcert.sh          # certificati HTTPS locali
 ├── lazygit.sh         # lazygit dall'ultima release
+├── act.sh             # act (GitHub Actions in locale)
 ├── setup-terminal.sh  # Starship + Tmux + Nerd Font
 ├── vscode-extensions.sh
+├── jetbrains-toolbox.sh # JetBrains Toolbox (checksum dall'API JetBrains)
 ├── git-config.sh      # identità e config git globale
 ├── cli-aliases.sh / dev-aliases.sh
 ├── java-home.sh / app-folders.sh
@@ -93,8 +139,14 @@ differenze specifiche della distro (nomi pacchetti, gestore, servizi).
 
 ## Personalizzazione
 
-L'identità git è impostata in [`common/git-config.sh`](common/git-config.sh): modifica
-`user.name` e `user.email` con i tuoi dati prima di lanciare lo script.
+L'identità git si passa da fuori, e viene scritta **solo se non è già configurata**
+(un rilancio non sovrascrive nome ed email reali):
+
+```bash
+GIT_USER_NAME="Mario Rossi" GIT_USER_EMAIL="mario@example.com" bash setup-dev-fedora.sh
+```
+
+Cosa installare si sceglie con le opzioni descritte sopra.
 
 ## Licenza
 
