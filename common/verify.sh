@@ -75,6 +75,17 @@ check_if "${WITH_MAILPIT:-1}"   mailpit version
 check_if "${WITH_VSCODE:-1}"    code --version
 check_if "${WITH_ACT:-1}"       act --version
 
+# Docker Desktop gira come user service e non ha un 'docker-desktop --version'
+# comodo: si verifica il binario installato.
+if [ "${WITH_DOCKERDESKTOP:-0}" = 1 ]; then
+    if [ -x /opt/docker-desktop/bin/docker-desktop ]; then
+        ok "docker-desktop — installato"
+    else
+        info "MANCANTE: docker-desktop"
+        FAIL=1
+    fi
+fi
+
 # Toolbox non si interroga da CLI (aprirebbe la GUI): si verifica il binario
 if [ "${WITH_JETBRAINS:-1}" = 1 ]; then
     if [ -x "$HOME/.local/share/JetBrains/Toolbox/bin/jetbrains-toolbox" ]; then

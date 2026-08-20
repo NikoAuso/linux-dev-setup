@@ -23,6 +23,7 @@ in modo **idempotente** (rilanciabile senza rompere nulla).
 - PostgreSQL
 - Redis
 - Docker + Docker Compose (con rotazione dei log dei container)
+- Docker Desktop (opt-in con `--dockerdesktop`, richiede KVM)
 - Apache (httpd/apache2) con moduli rewrite/ssl/headers
 - phpMyAdmin
 - Mailpit (email testing locale: UI su `:8025`, SMTP su `:1025`) — `mail()` di PHP ci finisce dentro
@@ -72,6 +73,9 @@ bash setup-dev-fedora.sh --no-mysql --no-desktop --no-jetbrains
 
 # ambiente minimo: niente desktop, niente IDE, niente phpenv
 bash setup-dev-ubuntu.sh --no-desktop --no-vscode --no-jetbrains --no-phpenv
+
+# aggiungere un blocco opt-in (Docker Desktop, disattivo di default)
+bash setup-dev-ubuntu.sh --dockerdesktop
 ```
 
 | Blocco | Cosa comprende |
@@ -86,6 +90,7 @@ bash setup-dev-ubuntu.sh --no-desktop --no-vscode --no-jetbrains --no-phpenv
 | `postgres` | PostgreSQL + pgcli |
 | `redis` | Redis |
 | `docker` | Docker + Docker Compose |
+| `dockerdesktop` | Docker Desktop — **opt-in**, attiva con `--dockerdesktop` |
 | `apache` | Apache |
 | `phpmyadmin` | phpMyAdmin (forzato off senza `apache` o `mysql`) |
 | `mailpit` | Mailpit + `sendmail_path` di PHP |

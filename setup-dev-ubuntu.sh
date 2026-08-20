@@ -29,6 +29,27 @@ source "$COMMON_DIR/options.sh" "$@"
 # Esegue un file-parte comune dalla cartella common/
 part() { bash "$COMMON_DIR/$1" "${@:2}"; }
 
+# Configura il repo apt di Docker in formato deb822 (.sources). Idempotente,
+# condiviso dai blocchi 'docker' e 'dockerdesktop'. Rimuove il vecchio
+# docker.list, altrimenti la stessa suite risulterebbe configurata due volte
+# (warning di apt) quando convivono engine e Docker Desktop.
+setup_docker_apt_repo() {
+    sudo install -m 0755 -d /etc/apt/keyrings
+    sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+        -o /etc/apt/keyrings/docker.asc
+    sudo chmod a+r /etc/apt/keyrings/docker.asc
+    sudo tee /etc/apt/sources.list.d/docker.sources > /dev/null << EOF
+Types: deb
+URIs: https://download.docker.com/linux/ubuntu
+Suites: $(. /etc/os-release && echo "$VERSION_CODENAME")
+Components: stable
+Architectures: $(dpkg --print-architecture)
+Signed-By: /etc/apt/keyrings/docker.asc
+EOF
+    sudo rm -f /etc/apt/sources.list.d/docker.list
+    sudo apt update
+}
+
 # Logging: salva tutto l'output (stdout+stderr) in un file con timestamp
 LOG_FILE="$SETUP_DIR/setup-ubuntu-$(date +%Y%m%d_%H%M%S).log"
 exec > >(tee "$LOG_FILE") 2>&1
@@ -223,16 +244,7 @@ fi
 # ── DOCKER ───────────────────────────────────
 if [ "$WITH_DOCKER" = 1 ]; then
     step "Docker + Docker Compose"
-    sudo install -m 0755 -d /etc/apt/keyrings
-    curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
-        | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-    sudo chmod a+r /etc/apt/keyrings/docker.gpg
-
-    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
-https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
-        | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-
-    sudo apt update
+    setup_docker_apt_repo
     sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
     # Rotazione dei log dei container: senza questa, un container loquace riempie
@@ -253,6 +265,26 @@ EOF
     ok "Docker installato"
     info "Riavvia la sessione per usare Docker senza sudo"
     done_item "Docker + Docker Compose (log rotation 10m x3)"
+fi
+
+# ── DOCKER DESKTOP ────────────────────────────
+# Opt-in (--dockerdesktop): GUI + VM sopra l'engine. Non è nel repo apt, si scarica
+# come .deb diretto da Docker; richiede KVM (virtualizzazione attiva nel BIOS).
+if [ "$WITH_DOCKERDESKTOP" = 1 ]; then
+    step "Docker Desktop"
+
+    # La .deb risolve le dipendenze dal repo apt di Docker: se il blocco 'docker'
+    # non l'ha già configurato (--no-docker), lo si prepara qui.
+    [ -f /etc/apt/keyrings/docker.asc ] || setup_docker_apt_repo
+
+    tmp_deb="$(mktemp --suffix=.deb)"
+    curl -fSL -o "$tmp_deb" https://desktop.docker.com/linux/main/amd64/docker-desktop-amd64.deb
+    sudo apt install -y "$tmp_deb"
+    rm -f "$tmp_deb"
+
+    ok "Docker Desktop installato"
+    info "Avvialo dal menu applicazioni; il primo avvio chiede l'accettazione dei termini"
+    done_item "Docker Desktop"
 fi
 
 # ── APACHE2 ───────────────────────────────────

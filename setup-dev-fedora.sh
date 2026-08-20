@@ -264,6 +264,29 @@ EOF
     done_item "Docker + Docker Compose (log rotation 10m x3)"
 fi
 
+# ── DOCKER DESKTOP ────────────────────────────
+# Opt-in (--dockerdesktop): GUI + VM sopra l'engine. Non è nel repo, si scarica
+# come .rpm diretto da Docker; richiede KVM (virtualizzazione attiva nel BIOS).
+if [ "$WITH_DOCKERDESKTOP" = 1 ]; then
+    step "Docker Desktop"
+
+    # Il .rpm risolve le dipendenze dal repo di Docker: se il blocco 'docker' non
+    # l'ha già configurato (--no-docker), lo si prepara qui.
+    if [ ! -f /etc/yum.repos.d/docker-ce.repo ]; then
+        sudo curl -fsSL https://download.docker.com/linux/fedora/docker-ce.repo \
+            -o /etc/yum.repos.d/docker-ce.repo
+    fi
+
+    tmp_rpm="$(mktemp --suffix=.rpm)"
+    curl -fSL -o "$tmp_rpm" https://desktop.docker.com/linux/main/amd64/docker-desktop-x86_64.rpm
+    sudo dnf install -y "$tmp_rpm"
+    rm -f "$tmp_rpm"
+
+    ok "Docker Desktop installato"
+    info "Avvialo dal menu applicazioni; il primo avvio chiede l'accettazione dei termini"
+    done_item "Docker Desktop"
+fi
+
 # ── APACHE (httpd) ────────────────────────────
 if [ "$WITH_APACHE" = 1 ]; then
     step "Apache (httpd)"

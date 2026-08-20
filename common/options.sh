@@ -15,7 +15,10 @@
 # ─────────────────────────────────────────────
 
 OPTION_NAMES=(terminal phpenv laravel node python java mysql postgres redis
-              docker apache phpmyadmin mailpit vscode jetbrains act desktop)
+              docker dockerdesktop apache phpmyadmin mailpit vscode jetbrains act desktop)
+
+# Opzioni disattive di default: opt-in esplicito con --<nome>. Il resto è on.
+OPTION_DEFAULT_OFF=(dockerdesktop)
 
 # Nome dell'entrypoint che ci sta sourcando, letto qui: dentro una funzione
 # gli indici di BASH_SOURCE scalano e punterebbero a options.sh stesso.
@@ -32,7 +35,7 @@ Uso: bash $_ENTRYPOINT [opzioni]
   --no-<nome>   esclude il blocco
   --help        questo messaggio
 
-Blocchi (tutti attivi di default):
+Blocchi (tutti attivi di default, tranne quelli marcati opt-in):
   terminal    Starship + Tmux + Nerd Font
   phpenv      phpenv + php-build + dipendenze di compilazione
   laravel     Pint e laravel/installer globali
@@ -43,6 +46,7 @@ Blocchi (tutti attivi di default):
   postgres    PostgreSQL + pgcli
   redis       Redis
   docker      Docker + Docker Compose
+  dockerdesktop  Docker Desktop (opt-in, richiede KVM) — usa --dockerdesktop
   apache      Apache
   phpmyadmin  phpMyAdmin (forzato off senza apache o mysql)
   mailpit     Mailpit (+ sendmail_path di PHP)
@@ -56,10 +60,14 @@ Identità git (scritta solo se non già configurata):
 EOF
 }
 
-# ── Default: la variabile d'ambiente se c'è, altrimenti 1 ──
+# ── Default: la variabile d'ambiente se c'è, altrimenti 1 (0 per gli opt-in) ──
 for _name in "${OPTION_NAMES[@]}"; do
     _var="$(_flag_var "$_name")"
-    printf -v "$_var" '%s' "${!_var:-1}"
+    case " ${OPTION_DEFAULT_OFF[*]} " in
+        *" $_name "*) _default=0 ;;
+        *)            _default=1 ;;
+    esac
+    printf -v "$_var" '%s' "${!_var:-$_default}"
 done
 
 # ── Riga di comando: sovrascrive i default ──
@@ -91,4 +99,4 @@ fi
 for _name in "${OPTION_NAMES[@]}"; do
     export "$(_flag_var "$_name")"
 done
-unset _name _var _val
+unset _name _var _val _default
