@@ -38,8 +38,8 @@ in modo **idempotente** (rilanciabile senza rompere nulla).
 **Applicazioni desktop**
 - VS Code + estensioni (PHP, Laravel, Docker, Python, Java, ecc.)
 - JetBrains Toolbox (PhpStorm & co.)
-- Chrome, Postman, Telegram, VLC, MEGAsync, GPaste
-- Organizzazione automatica del menu applicazioni GNOME in cartelle
+- Chrome, Postman, Telegram, VLC, MEGAsync + clipboard manager (GPaste su GNOME, su Plasma c'è già Klipper)
+- Organizzazione automatica del menu applicazioni in cartelle (solo GNOME; Plasma raggruppa già per categoria)
 
 **Git**
 - Configurazione globale con delta come pager e alias utili
@@ -47,6 +47,7 @@ in modo **idempotente** (rilanciabile senza rompere nulla).
 ## Requisiti
 
 - **Ubuntu** 24.04+ oppure **Fedora** 44+
+- Desktop: **GNOME** e **KDE Plasma** supportati senza modifiche. Gli script rilevano il desktop e adattano i passi specifici (menu applicazioni, clipboard manager, database); su altri DE i passi GNOME-only vengono saltati senza errori.
 - Utente normale con privilegi `sudo` (**non** eseguire come root)
 - Connessione a internet
 
@@ -86,7 +87,7 @@ bash setup-dev-ubuntu.sh --dockerdesktop
 | `node` | Node.js LTS via nvm |
 | `python` | Python 3 + pip + pipx (mycli/pgcli) |
 | `java` | OpenJDK |
-| `mysql` | MySQL Server + mycli |
+| `mysql` | MySQL Server + mycli (su KDE usa il MariaDB preinstallato da Akonadi) |
 | `postgres` | PostgreSQL + pgcli |
 | `redis` | Redis |
 | `docker` | Docker + Docker Compose |
@@ -97,7 +98,7 @@ bash setup-dev-ubuntu.sh --dockerdesktop
 | `vscode` | VS Code + estensioni |
 | `jetbrains` | JetBrains Toolbox |
 | `act` | act |
-| `desktop` | Chrome, Postman, Telegram, VLC, MEGAsync, GPaste |
+| `desktop` | Chrome, Postman, Telegram, VLC, MEGAsync, clipboard manager (GPaste su GNOME, Klipper su Plasma) |
 
 `--<nome>` lo include esplicitamente, `--no-<nome>` lo esclude. Le stesse scelte si possono
 passare come variabili d'ambiente `WITH_<NOME>=0` (utile negli script); la riga di comando
@@ -140,6 +141,7 @@ differenze specifiche della distro (nomi pacchetti, gestore, servizi).
 - **Logging**: ogni esecuzione salva l'output completo in `setup-<distro>-<timestamp>.log`.
 - **Verifica**: alla fine `verify.sh` controlla che i comandi principali rispondano e che i servizi siano attivi, segnalando in giallo ciò che manca.
 - **Idempotenza**: pacchetti già presenti vengono saltati, le righe nel `.bashrc` vengono aggiunte una sola volta.
+- **KDE Plasma**: dove Akonadi ha già installato MariaDB, il blocco `mysql` lo riusa invece di installare `mysql-server` (che sarebbe in conflitto), senza rimuovere il backend di KDE PIM.
 - **Azioni post-setup** suggerite a fine run: `sudo mysql_secure_installation`, eventuali versioni PHP extra con `phpenv install <versione>`.
 
 ## Personalizzazione

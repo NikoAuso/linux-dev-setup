@@ -2,6 +2,8 @@
 
 # ── Organizzazione menu app GNOME (cross-distro) ─
 # Esegui con: bash app-folders.sh (dentro una sessione grafica GNOME)
+# Solo GNOME: Plasma e gli altri DE raggruppano già le app per categoria
+# freedesktop nativamente, quindi qui vengono saltati.
 
 set -euo pipefail
 PART_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -10,7 +12,9 @@ source "$PART_DIR/lib.sh"
 
 step "Organizzazione applicazioni del menu in cartelle per scopo"
 
-if command -v gsettings &>/dev/null && [ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ]; then
+if [ "$(detect_desktop)" != gnome ]; then
+    info "Desktop non GNOME: Plasma e altri DE raggruppano già le app per categoria, organizzazione menu saltata"
+elif command -v gsettings &>/dev/null && [ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ]; then
     APPF_SCHEMA="org.gnome.desktop.app-folders"
     APPF_BASE="/org/gnome/desktop/app-folders/folders"
 

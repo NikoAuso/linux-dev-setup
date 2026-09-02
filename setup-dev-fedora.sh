@@ -209,11 +209,23 @@ fi
 # ── MYSQL ────────────────────────────────────
 if [ "$WITH_MYSQL" = 1 ]; then
     step "MySQL Server"
-    sudo dnf install -y mysql-server mysql
-    sudo systemctl enable --now mysqld
-    ok "MySQL installato e avviato"
+    # Su Plasma/KDE, Akonadi (KDE PIM) preinstalla mariadb-server, in conflitto con
+    # mysql-server. In quel caso si usa MariaDB (drop-in di MySQL) senza rimuovere
+    # Akonadi. MYSQL_SERVICE tiene il nome del servizio per la verifica finale.
+    if rpm -q mariadb-server &>/dev/null; then
+        MYSQL_SERVICE=mariadb
+        sudo systemctl enable --now mariadb
+        info "mariadb-server già presente (Akonadi/KDE): uso MariaDB invece di MySQL"
+        ok "MariaDB attivo"
+        done_item "MariaDB Server (già presente, compatibile MySQL)"
+    else
+        MYSQL_SERVICE=mysqld
+        sudo dnf install -y mysql-server mysql
+        sudo systemctl enable --now mysqld
+        ok "MySQL installato e avviato"
+        done_item "MySQL Server"
+    fi
     info "Esegui 'sudo mysql_secure_installation' per proteggere l'installazione"
-    done_item "MySQL Server"
 fi
 
 # ── POSTGRESQL ────────────────────────────────
@@ -417,11 +429,20 @@ part dev-aliases.sh
 
 # ── APP DESKTOP & EXTRA ───────────────────────
 if [ "$WITH_DESKTOP" = 1 ]; then
-    step "App desktop ed extra (Chrome, Postman, Telegram, VLC, MEGAsync, GPaste, git-filter-repo)"
+    step "App desktop ed extra (Chrome, Postman, Telegram, VLC, MEGAsync, clipboard manager, git-filter-repo)"
 
-    # git-filter-repo + GPaste — nei repo Fedora
-    sudo dnf install -y git-filter-repo gpaste gnome-shell-extension-gpaste 2>/dev/null \
-        || sudo dnf install -y git-filter-repo gpaste
+    # git-filter-repo — nei repo Fedora
+    sudo dnf install -y git-filter-repo
+
+    # Clipboard manager: GPaste è per GNOME; Plasma usa Klipper (già integrato)
+    if [ "$(detect_desktop)" = gnome ]; then
+        sudo dnf install -y gpaste gnome-shell-extension-gpaste 2>/dev/null \
+            || sudo dnf install -y gpaste
+        CLIPBOARD="GPaste"
+    else
+        CLIPBOARD="Klipper (già presente)"
+        info "Desktop non GNOME: GPaste saltato, Plasma usa Klipper"
+    fi
 
     # VLC — richiede RPM Fusion (repo non-free/free non incluso di default in Fedora)
     sudo dnf install -y "https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm" 2>/dev/null || true
@@ -465,19 +486,21 @@ EOF
 
     ok "App desktop ed extra installate"
     if [ "${MEGA_SKIPPED:-0}" = "1" ]; then
-        done_item "Chrome, Postman, Telegram, VLC, GPaste, git-filter-repo ${YELLOW}(MEGAsync saltato)${NC}"
+        done_item "Chrome, Postman, Telegram, VLC, ${CLIPBOARD}, git-filter-repo ${YELLOW}(MEGAsync saltato)${NC}"
     else
-        done_item "Chrome, Postman, Telegram, VLC, MEGAsync, GPaste, git-filter-repo"
+        done_item "Chrome, Postman, Telegram, VLC, MEGAsync, ${CLIPBOARD}, git-filter-repo"
     fi
 
-    part app-folders.sh
-    done_item "Menu applicazioni organizzato in cartelle per scopo"
+    part app-folders.sh || info "app-folders.sh non completato, proseguo"
+    if [ "$(detect_desktop)" = gnome ]; then
+        done_item "Menu applicazioni organizzato in cartelle per scopo"
+    fi
 fi
 
 # ── VERIFICA ─────────────────────────────────
 VERIFY_SERVICES=(php-fpm)
 if [ "$WITH_APACHE" = 1 ];   then VERIFY_SERVICES+=(httpd); fi
-if [ "$WITH_MYSQL" = 1 ];    then VERIFY_SERVICES+=(mysqld); fi
+if [ "$WITH_MYSQL" = 1 ];    then VERIFY_SERVICES+=("${MYSQL_SERVICE:-mysqld}"); fi
 if [ "$WITH_POSTGRES" = 1 ]; then VERIFY_SERVICES+=(postgresql); fi
 if [ "$WITH_DOCKER" = 1 ];   then VERIFY_SERVICES+=(docker); fi
 if [ "$WITH_REDIS" = 1 ];    then VERIFY_SERVICES+=(redis); fi

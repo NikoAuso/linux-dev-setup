@@ -222,11 +222,23 @@ fi
 # ── MYSQL ────────────────────────────────────
 if [ "$WITH_MYSQL" = 1 ]; then
     step "MySQL Server"
-    sudo apt install -y mysql-server mysql-client
-    sudo systemctl enable --now mysql
-    ok "MySQL installato e avviato"
+    # Su Plasma/KDE, Akonadi (KDE PIM) preinstalla mariadb-server, in conflitto con
+    # mysql-server. In quel caso si usa MariaDB (drop-in di MySQL) senza rimuovere
+    # Akonadi. MYSQL_SERVICE tiene il nome del servizio per la verifica finale.
+    if dpkg -s mariadb-server &>/dev/null; then
+        MYSQL_SERVICE=mariadb
+        sudo systemctl enable --now mariadb
+        info "mariadb-server già presente (Akonadi/KDE): uso MariaDB invece di MySQL"
+        ok "MariaDB attivo"
+        done_item "MariaDB Server (già presente, compatibile MySQL)"
+    else
+        MYSQL_SERVICE=mysql
+        sudo apt install -y mysql-server mysql-client
+        sudo systemctl enable --now mysql
+        ok "MySQL installato e avviato"
+        done_item "MySQL Server"
+    fi
     info "Esegui 'sudo mysql_secure_installation' per proteggere l'installazione"
-    done_item "MySQL Server"
 fi
 
 # ── POSTGRESQL ────────────────────────────────
@@ -451,10 +463,19 @@ part dev-aliases.sh
 
 # ── APP DESKTOP & EXTRA ───────────────────────
 if [ "$WITH_DESKTOP" = 1 ]; then
-    step "App desktop ed extra (Chrome, Postman, Telegram, VLC, MEGAsync, GPaste, git-filter-repo)"
+    step "App desktop ed extra (Chrome, Postman, Telegram, VLC, MEGAsync, clipboard manager, git-filter-repo)"
 
-    # VLC, GPaste, git-filter-repo — nei repo Ubuntu
-    sudo apt install -y vlc gpaste-2 git-filter-repo
+    # VLC, git-filter-repo — nei repo Ubuntu
+    sudo apt install -y vlc git-filter-repo
+
+    # Clipboard manager: GPaste è per GNOME; Plasma usa Klipper (già integrato)
+    if [ "$(detect_desktop)" = gnome ]; then
+        sudo apt install -y gpaste-2
+        CLIPBOARD="GPaste"
+    else
+        CLIPBOARD="Klipper (già presente)"
+        info "Desktop non GNOME: GPaste saltato, Plasma usa Klipper"
+    fi
 
     # Google Chrome — repo ufficiale Google
     if ! command -v google-chrome &>/dev/null; then
@@ -490,19 +511,21 @@ if [ "$WITH_DESKTOP" = 1 ]; then
 
     ok "App desktop ed extra installate"
     if [ "${MEGA_SKIPPED:-0}" = "1" ]; then
-        done_item "Chrome, Postman, Telegram, VLC, GPaste, git-filter-repo ${YELLOW}(MEGAsync saltato)${NC}"
+        done_item "Chrome, Postman, Telegram, VLC, ${CLIPBOARD}, git-filter-repo ${YELLOW}(MEGAsync saltato)${NC}"
     else
-        done_item "Chrome, Postman, Telegram, VLC, MEGAsync, GPaste, git-filter-repo"
+        done_item "Chrome, Postman, Telegram, VLC, MEGAsync, ${CLIPBOARD}, git-filter-repo"
     fi
 
-    part app-folders.sh
-    done_item "Menu applicazioni organizzato in cartelle per scopo"
+    part app-folders.sh || info "app-folders.sh non completato, proseguo"
+    if [ "$(detect_desktop)" = gnome ]; then
+        done_item "Menu applicazioni organizzato in cartelle per scopo"
+    fi
 fi
 
 # ── VERIFICA ─────────────────────────────────
 VERIFY_SERVICES=()
 if [ "$WITH_APACHE" = 1 ];   then VERIFY_SERVICES+=(apache2); fi
-if [ "$WITH_MYSQL" = 1 ];    then VERIFY_SERVICES+=(mysql); fi
+if [ "$WITH_MYSQL" = 1 ];    then VERIFY_SERVICES+=("${MYSQL_SERVICE:-mysql}"); fi
 if [ "$WITH_POSTGRES" = 1 ]; then VERIFY_SERVICES+=(postgresql); fi
 if [ "$WITH_DOCKER" = 1 ];   then VERIFY_SERVICES+=(docker); fi
 if [ "$WITH_REDIS" = 1 ];    then VERIFY_SERVICES+=(redis-server); fi

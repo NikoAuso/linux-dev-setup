@@ -67,7 +67,10 @@ check_if "${WITH_NODE:-1}"      node --version
 check_if "${WITH_NODE:-1}"      npm --version
 check_if "${WITH_PYTHON:-1}"    python3 --version
 check_if "${WITH_JAVA:-1}"      java -version
-check_if "${WITH_MYSQL:-1}"     mysql --version
+# Il client può essere 'mysql' o 'mariadb' (MariaDB recente non installa il symlink)
+if [ "${WITH_MYSQL:-1}" = 1 ]; then
+    if command -v mysql >/dev/null 2>&1; then check mysql --version; else check mariadb --version; fi
+fi
 check_if "${WITH_POSTGRES:-1}"  psql --version
 check_if "${WITH_REDIS:-1}"     redis-cli --version
 check_if "${WITH_DOCKER:-1}"    docker --version

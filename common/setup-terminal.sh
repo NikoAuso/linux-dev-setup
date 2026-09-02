@@ -115,7 +115,11 @@ if ! fc-list 2>/dev/null | grep -qi "JetBrainsMono Nerd"; then
         rm -f /tmp/JetBrainsMono.zip
         fc-cache -f "$HOME/.local/share/fonts" >/dev/null 2>&1
         ok "Nerd Font installata"
-        info "Imposta 'JetBrainsMono Nerd Font' come font del terminale (GNOME Terminal → Preferenze → profilo → Testo)"
+        case "$(detect_desktop)" in
+            gnome) info "Imposta 'JetBrainsMono Nerd Font' come font del terminale (GNOME Terminal → Preferenze → profilo → Testo)" ;;
+            kde)   info "Imposta 'JetBrainsMono Nerd Font' come font del terminale (Konsole → Impostazioni → Modifica profilo → Aspetto)" ;;
+            *)     info "Imposta 'JetBrainsMono Nerd Font' come font del terminale" ;;
+        esac
     else
         info "Download della Nerd Font fallito, saltato (scaricala da nerdfonts.com)"
     fi

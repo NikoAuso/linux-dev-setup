@@ -46,6 +46,19 @@ backup_if_exists() {
 
 backup_bashrc() { backup_if_exists "$HOME/.bashrc"; }
 
+# Rileva il desktop environment attivo, normalizzato a: gnome | kde | "".
+# Usa XDG_CURRENT_DESKTOP (standard freedesktop) con fallback su
+# XDG_SESSION_DESKTOP e DESKTOP_SESSION. Restituisce stringa vuota se ignoto
+# (sessione non grafica, SSH, TTY): chi chiama decide se saltare o degradare.
+detect_desktop() {
+    local d="${XDG_CURRENT_DESKTOP:-${XDG_SESSION_DESKTOP:-${DESKTOP_SESSION:-}}}"
+    case "${d,,}" in
+        *gnome*)        echo gnome ;;
+        *kde*|*plasma*) echo kde ;;
+        *)              echo "" ;;
+    esac
+}
+
 # Chiede la password sudo una volta e la tiene viva finché lo script gira,
 # così i download lunghi non fanno scadere il timestamp e ricomparire il prompt
 # a metà esecuzione. Va chiamata dai soli script principali (non dalle parti).
