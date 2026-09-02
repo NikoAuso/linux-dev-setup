@@ -67,8 +67,6 @@ ok "Sistema aggiornato"
 step "Strumenti base"
 sudo apt install -y \
     git curl wget unzip zip tar \
-    htop btop \
-    vim neovim \
     build-essential \
     openssl \
     ca-certificates gnupg

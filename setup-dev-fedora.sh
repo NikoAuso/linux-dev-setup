@@ -46,8 +46,6 @@ ok "Sistema aggiornato"
 step "Strumenti base"
 sudo dnf install -y \
     git curl wget unzip zip tar \
-    htop btop \
-    vim neovim \
     make gcc gcc-c++ kernel-devel \
     openssl openssl-devel \
     ca-certificates gnupg2
