@@ -304,7 +304,14 @@ if [ "$WITH_APACHE" = 1 ]; then
     sudo systemctl enable --now httpd
     sudo usermod -aG apache "$USER"
 
+    # SELinux: senza questi boolean un progetto servito da fuori /var/www (tipico:
+    # un vhost che punta ai sorgenti nella home) risponde 403, e php-fpm non riesce
+    # ad aprire connessioni TCP verso MySQL/PostgreSQL. Su una workstation di
+    # sviluppo è voluto: allarga la lettura di httpd ai contenuti utente.
     sudo setsebool -P httpd_can_network_connect 1
+    sudo setsebool -P httpd_can_network_connect_db 1
+    sudo setsebool -P httpd_enable_homedirs 1
+    sudo setsebool -P httpd_read_user_content 1
     # Nessuna apertura del firewall: lo sviluppo locale usa il loopback (localhost),
     # che non passa dal firewall. Aprire http/https esporrebbe i siti dev e phpMyAdmin
     # a tutta la LAN. Per abilitare di proposito i test da altri dispositivi:
@@ -431,21 +438,34 @@ part dev-aliases.sh
 if [ "$WITH_DESKTOP" = 1 ]; then
     step "App desktop ed extra (Chrome, Postman, Telegram, VLC, MEGAsync, clipboard manager, git-filter-repo)"
 
-    # git-filter-repo — nei repo Fedora
-    sudo dnf install -y git-filter-repo
+    # Ogni installazione qui è guardata con '|| info': sono app indipendenti e con
+    # 'set -e' un singolo fallimento (repo di terze parti giù, pacchetto rinominato)
+    # farebbe saltare in silenzio tutte quelle successive.
+    DESKTOP_ENV="$(detect_desktop)"
 
-    # Clipboard manager: GPaste è per GNOME; Plasma usa Klipper (già integrato)
-    if [ "$(detect_desktop)" = gnome ]; then
-        sudo dnf install -y gpaste gnome-shell-extension-gpaste 2>/dev/null \
-            || sudo dnf install -y gpaste
+    # git-filter-repo — nei repo Fedora
+    sudo dnf install -y git-filter-repo || info "git-filter-repo non installato"
+
+    # Clipboard manager: GPaste è per GNOME; Plasma usa Klipper (già integrato).
+    # gpaste da solo è solo daemon + CLI: la GUI sta in gpaste-ui.
+    if [ "$DESKTOP_ENV" = gnome ]; then
+        sudo dnf install -y gpaste gpaste-ui gnome-shell-extension-gpaste 2>/dev/null \
+            || sudo dnf install -y gpaste gpaste-ui \
+            || info "GPaste non installato"
         CLIPBOARD="GPaste"
     else
         CLIPBOARD="Klipper (già presente)"
         info "Desktop non GNOME: GPaste saltato, Plasma usa Klipper"
     fi
 
-    # VLC — richiede RPM Fusion (repo non-free/free non incluso di default in Fedora)
-    sudo dnf install -y "https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm" 2>/dev/null || true
+    # VLC + codec — richiedono RPM Fusion, non incluso di default in Fedora.
+    # Serve anche il repo nonfree: Fedora spedisce ffmpeg-free, privo dei codec
+    # proprietari, e senza lo swap VLC non riproduce parecchi formati.
+    for _rpmfusion in free nonfree; do
+        sudo dnf install -y "https://mirrors.rpmfusion.org/${_rpmfusion}/fedora/rpmfusion-${_rpmfusion}-release-$(rpm -E %fedora).noarch.rpm" 2>/dev/null || true
+    done
+    sudo dnf swap -y ffmpeg-free ffmpeg --allowerasing 2>/dev/null \
+        || info "swap ffmpeg-free → ffmpeg non riuscito (verifica RPM Fusion nonfree)"
     sudo dnf install -y vlc || info "VLC non installato (verifica RPM Fusion)"
 
     # Google Chrome — repo ufficiale Google
@@ -458,29 +478,62 @@ enabled=1
 gpgcheck=1
 gpgkey=https://dl.google.com/linux/linux_signing_key.pub
 EOF
-        sudo dnf install -y google-chrome-stable
+        sudo dnf install -y google-chrome-stable || info "Google Chrome non installato"
     fi
 
     # Telegram — nei repo Fedora, fallback su Flatpak
     sudo dnf install -y telegram-desktop 2>/dev/null || TELEGRAM_FLATPAK=1
 
     # Postman — non nei repo Fedora: via Flatpak (Flathub)
-    sudo dnf install -y flatpak
-    flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-    flatpak install -y --noninteractive flathub com.getpostman.Postman || info "Postman (Flatpak) saltato"
+    sudo dnf install -y flatpak || info "flatpak non installato"
+    # 'sudo': i remote di sistema passano da polkit e senza agente attivo il
+    # comando fallirebbe (o resterebbe appeso a un dialog) portandosi via il resto.
+    sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo \
+        || info "Flathub non aggiunto"
+    # Se i repo di terze parti sono stati abilitati in fase di installazione, Fedora
+    # aggiunge flathub *filtrato* alla propria allowlist: --if-not-exists non lo
+    # tocca (il remote esiste già) e Postman risulterebbe introvabile.
+    sudo flatpak remote-modify --no-filter --enable flathub 2>/dev/null || true
+
+    sudo flatpak install -y --noninteractive flathub com.getpostman.Postman || info "Postman (Flatpak) saltato"
     if [ "${TELEGRAM_FLATPAK:-0}" = "1" ]; then
-        flatpak install -y --noninteractive flathub org.telegram.desktop || info "Telegram saltato"
+        sudo flatpak install -y --noninteractive flathub org.telegram.desktop || info "Telegram saltato"
     fi
 
-    # MEGAsync — RPM ufficiale per la versione di Fedora in uso
-    if ! command -v megasync &>/dev/null; then
+    # MEGAsync — repo ufficiale MEGA, così gli aggiornamenti arrivano via dnf.
+    # Gli .rpm diretti sotto /x86_64/ non esistono più (404), c'è solo il repo.
+    # MEGA lo pubblica con settimane di ritardo sulle release Fedora: se quello
+    # della versione corrente non c'è ancora si ripiega sulla precedente.
+    if ! rpm -q megasync &>/dev/null; then
         MEGA_VER="$(rpm -E %fedora)"
-        if curl -fsSLo /tmp/megasync.rpm "https://mega.nz/linux/repo/Fedora_${MEGA_VER}/x86_64/megasync-Fedora_${MEGA_VER}_x86_64.rpm"; then
-            sudo dnf install -y /tmp/megasync.rpm
-            rm -f /tmp/megasync.rpm
+        if ! curl -fsS -o /dev/null "https://mega.nz/linux/repo/Fedora_${MEGA_VER}/repodata/repomd.xml"; then
+            MEGA_VER=$((MEGA_VER - 1))
+            info "Repo MEGA per Fedora $(rpm -E %fedora) non ancora pubblicato, uso Fedora_${MEGA_VER}"
+        fi
+
+        sudo tee /etc/yum.repos.d/MEGAsync.repo > /dev/null << EOF
+[MEGAsync]
+name=MEGAsync
+baseurl=https://mega.nz/linux/repo/Fedora_${MEGA_VER}/
+gpgkey=https://mega.nz/linux/repo/Fedora_${MEGA_VER}/repodata/repomd.xml.key
+gpgcheck=1
+enabled=1
+EOF
+
+        # Estensione del file manager: MEGA ne pubblica una per ogni desktop.
+        case "$DESKTOP_ENV" in
+            gnome) MEGA_EXT=nautilus-megasync ;;
+            kde)   MEGA_EXT=dolphin-megasync ;;
+            *)     MEGA_EXT= ;;
+        esac
+
+        if sudo dnf install -y megasync ${MEGA_EXT:+"$MEGA_EXT"}; then
+            # Il pacchetto sovrascrive il .repo con uno che usa $releasever: se
+            # siamo sul fallback tornerebbe a puntare a un repo inesistente.
+            sudo sed -i "s/\$releasever/${MEGA_VER}/g" /etc/yum.repos.d/MEGAsync.repo
         else
             MEGA_SKIPPED=1
-            info "Pacchetto MEGAsync per Fedora ${MEGA_VER} non disponibile, saltato (scaricalo da mega.nz/desktop)"
+            info "MEGAsync non installato (scaricalo da mega.nz/desktop)"
         fi
     fi
 
@@ -492,7 +545,7 @@ EOF
     fi
 
     part app-folders.sh || info "app-folders.sh non completato, proseguo"
-    if [ "$(detect_desktop)" = gnome ]; then
+    if [ "$DESKTOP_ENV" = gnome ]; then
         done_item "Menu applicazioni organizzato in cartelle per scopo"
     fi
 fi

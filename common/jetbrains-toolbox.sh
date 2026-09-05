@@ -10,9 +10,45 @@ source "$PART_DIR/lib.sh"
 
 step "JetBrains Toolbox"
 
-TOOLBOX_DIR="$HOME/.local/share/JetBrains/Toolbox/bin"
+# ~/.local/share/JetBrains/Toolbox è la posizione che Toolbox usa per
+# auto-aggiornarsi: scrive lì senza sudo e sostituisce il proprio binario.
+# Installandolo sotto /opt gli update automatici fallirebbero in silenzio.
+TOOLBOX_HOME="$HOME/.local/share/JetBrains/Toolbox"
+TOOLBOX_DIR="$TOOLBOX_HOME/bin"
+
+# Voce di menu e icona: il tarball le contiene in bin/ ma non le installa. Senza
+# questo passo Toolbox non compare tra le applicazioni e resta di fatto invisibile.
+# Exec punta al path assoluto: i launcher del menu non ereditano sempre il PATH
+# di login, quindi il solo symlink in ~/.local/bin non basta.
+install_menu_entry() {
+    local apps="$HOME/.local/share/applications"
+    local icons="$HOME/.local/share/icons/hicolor/scalable/apps"
+
+    if [ -f "$TOOLBOX_DIR/toolbox.svg" ]; then
+        install -Dm644 "$TOOLBOX_DIR/toolbox.svg" "$icons/jetbrains-toolbox.svg"
+    fi
+
+    install -d "$apps"
+    cat > "$apps/jetbrains-toolbox.desktop" << EOF
+[Desktop Entry]
+Type=Application
+Name=JetBrains Toolbox
+Comment=Gestore degli IDE JetBrains
+Exec=$TOOLBOX_DIR/jetbrains-toolbox %u
+Icon=jetbrains-toolbox
+Categories=Development;IDE;
+StartupWMClass=jetbrains-toolbox
+StartupNotify=false
+Terminal=false
+EOF
+
+    update-desktop-database "$apps" >/dev/null 2>&1 || true
+    gtk-update-icon-cache -qtf "$HOME/.local/share/icons/hicolor" >/dev/null 2>&1 || true
+}
+
 if [ -x "$TOOLBOX_DIR/jetbrains-toolbox" ]; then
-    ok "JetBrains Toolbox già installato"
+    install_menu_entry
+    ok "JetBrains Toolbox già installato (voce di menu aggiornata)"
     exit 0
 fi
 
@@ -40,6 +76,7 @@ tar xzf /tmp/jetbrains-toolbox.tar.gz --directory="$TOOLBOX_DIR" --strip-compone
 rm -f /tmp/jetbrains-toolbox.tar.gz
 
 ln -sf "$TOOLBOX_DIR/jetbrains-toolbox" "$HOME/.local/bin/jetbrains-toolbox"
+install_menu_entry
 
-ok "JetBrains Toolbox installato — avvialo con 'jetbrains-toolbox'"
-info "Al primo avvio crea la voce nel menu e installa gli IDE (PhpStorm, ecc.)"
+ok "JetBrains Toolbox installato — cercalo nel menu o avvialo con 'jetbrains-toolbox'"
+info "Al primo avvio installa gli IDE (PhpStorm, ecc.) e si aggiorna da solo"

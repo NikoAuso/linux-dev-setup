@@ -44,6 +44,18 @@ check_if() {
     [ "$flag" = 1 ] && check "$@"
 }
 
+# present <etichetta> <comando di test...> — verifica la presenza senza eseguire
+# l'applicazione: una GUI invocata con --version si aprirebbe davvero.
+present() {
+    local label="$1"; shift
+    if "$@" >/dev/null 2>&1; then
+        ok "$label — installato"
+    else
+        info "MANCANTE: $label"
+        FAIL=1
+    fi
+}
+
 # ── Sempre presenti ───────────────────────────
 check git --version
 check php --version
@@ -78,6 +90,22 @@ check_if "${WITH_MAILPIT:-1}"   mailpit version
 check_if "${WITH_VSCODE:-1}"    code --version
 check_if "${WITH_ACT:-1}"       act --version
 
+# App del blocco desktop: senza questi controlli un fallimento lì passava
+# inosservato e lo script chiudeva comunque con "Setup completato".
+if [ "${WITH_DESKTOP:-1}" = 1 ]; then
+    present "google-chrome"   command -v google-chrome
+    present "vlc"             command -v vlc
+    present "megasync"        command -v megasync
+    # Su Fedora è un modulo Python esposto come sottocomando git, non un binario
+    present "git-filter-repo" sh -c 'command -v git-filter-repo || git filter-repo --version'
+    # Il pacchetto Fedora installa /usr/bin/Telegram; il fallback è il Flatpak
+    present "telegram"        sh -c 'command -v Telegram || command -v telegram-desktop || flatpak info org.telegram.desktop'
+    present "postman"         sh -c 'flatpak info com.getpostman.Postman || command -v postman'
+    if [ "$(detect_desktop)" = gnome ]; then
+        present "gpaste"      command -v gpaste-client
+    fi
+fi
+
 # Docker Desktop gira come user service e non ha un 'docker-desktop --version'
 # comodo: si verifica il binario installato.
 if [ "${WITH_DOCKERDESKTOP:-0}" = 1 ]; then
@@ -89,14 +117,12 @@ if [ "${WITH_DOCKERDESKTOP:-0}" = 1 ]; then
     fi
 fi
 
-# Toolbox non si interroga da CLI (aprirebbe la GUI): si verifica il binario
+# Toolbox non si interroga da CLI (aprirebbe la GUI): si verifica il binario.
+# La voce di menu è a parte: il tarball la contiene ma non la installa, e senza
+# quella Toolbox risulta invisibile tra le applicazioni.
 if [ "${WITH_JETBRAINS:-1}" = 1 ]; then
-    if [ -x "$HOME/.local/share/JetBrains/Toolbox/bin/jetbrains-toolbox" ]; then
-        ok "jetbrains-toolbox — installato"
-    else
-        info "MANCANTE: jetbrains-toolbox"
-        FAIL=1
-    fi
+    present "jetbrains-toolbox" test -x "$HOME/.local/share/JetBrains/Toolbox/bin/jetbrains-toolbox"
+    present "jetbrains-toolbox (voce di menu)" test -f "$HOME/.local/share/applications/jetbrains-toolbox.desktop"
 fi
 
 # Servizi passati dal chiamante (nomi specifici per distro)
