@@ -465,19 +465,29 @@ part dev-aliases.sh
 if [ "$WITH_DESKTOP" = 1 ]; then
     step "App desktop ed extra (Chrome, Postman, Telegram, VLC, MEGAsync, clipboard manager, git-filter-repo)"
 
-    # VLC, git-filter-repo — nei repo Ubuntu
-    sudo apt install -y vlc git-filter-repo
+    # Ogni installazione qui è guardata con '|| info': sono app indipendenti e con
+    # 'set -e' un singolo fallimento (una source apt rotta, uno snap ritirato)
+    # farebbe saltare in silenzio tutte quelle successive.
+    DESKTOP_ENV="$(detect_desktop)"
 
-    # Clipboard manager: GPaste è per GNOME; Plasma usa Klipper (già integrato)
-    if [ "$(detect_desktop)" = gnome ]; then
-        sudo apt install -y gpaste-2
+    # VLC, git-filter-repo — nei repo Ubuntu
+    sudo apt install -y vlc git-filter-repo || info "VLC/git-filter-repo non installati"
+
+    # Clipboard manager: GPaste è per GNOME; Plasma usa Klipper (già integrato).
+    # gpaste-2 è daemon + CLI: l'integrazione nella shell sta nell'estensione.
+    if [ "$DESKTOP_ENV" = gnome ]; then
+        sudo apt install -y gpaste-2 gnome-shell-extension-gpaste \
+            || sudo apt install -y gpaste-2 \
+            || info "GPaste non installato"
         CLIPBOARD="GPaste"
     else
         CLIPBOARD="Klipper (già presente)"
         info "Desktop non GNOME: GPaste saltato, Plasma usa Klipper"
     fi
 
-    # Google Chrome — repo ufficiale Google
+    # Google Chrome — repo ufficiale Google. 'apt update' esce non-zero se una
+    # qualunque altra source è rotta (PPA stantio, release EOL): senza guardia si
+    # porterebbe dietro tutto il resto del blocco.
     if ! command -v google-chrome &>/dev/null; then
         sudo install -m 0755 -d /etc/apt/keyrings
         curl -fsSL https://dl.google.com/linux/linux_signing_key.pub \
@@ -485,14 +495,14 @@ if [ "$WITH_DESKTOP" = 1 ]; then
         sudo chmod a+r /etc/apt/keyrings/google-chrome.gpg
         echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-chrome.gpg] https://dl.google.com/linux/chrome/deb/ stable main" \
             | sudo tee /etc/apt/sources.list.d/google-chrome.list > /dev/null
-        sudo apt update
-        sudo apt install -y google-chrome-stable
+        sudo apt update || info "apt update con errori, proseguo"
+        sudo apt install -y google-chrome-stable || info "Google Chrome non installato"
     fi
 
     # Postman e Telegram — via snap
     if command -v snap &>/dev/null; then
-        snap list postman &>/dev/null || sudo snap install postman
-        snap list telegram-desktop &>/dev/null || sudo snap install telegram-desktop
+        snap list postman &>/dev/null || sudo snap install postman || info "Postman (snap) saltato"
+        snap list telegram-desktop &>/dev/null || sudo snap install telegram-desktop || info "Telegram (snap) saltato"
     else
         info "snap non disponibile: Postman e Telegram saltati"
     fi
@@ -501,7 +511,7 @@ if [ "$WITH_DESKTOP" = 1 ]; then
     if ! command -v megasync &>/dev/null; then
         MEGA_VER="$(. /etc/os-release && echo "$VERSION_ID")"
         if curl -fsSLo /tmp/megasync.deb "https://mega.nz/linux/repo/xUbuntu_${MEGA_VER}/amd64/megasync-xUbuntu_${MEGA_VER}_amd64.deb"; then
-            sudo apt install -y /tmp/megasync.deb
+            sudo apt install -y /tmp/megasync.deb || MEGA_SKIPPED=1
             rm -f /tmp/megasync.deb
         else
             MEGA_SKIPPED=1
@@ -517,7 +527,7 @@ if [ "$WITH_DESKTOP" = 1 ]; then
     fi
 
     part app-folders.sh || info "app-folders.sh non completato, proseguo"
-    if [ "$(detect_desktop)" = gnome ]; then
+    if [ "$DESKTOP_ENV" = gnome ]; then
         done_item "Menu applicazioni organizzato in cartelle per scopo"
     fi
 fi
