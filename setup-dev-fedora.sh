@@ -344,7 +344,7 @@ fi
 
 # ── MAILPIT ──────────────────────────────────
 if [ "$WITH_MAILPIT" = 1 ]; then
-    part mailpit.sh nobody
+    part mailpit.sh
     done_item "Mailpit — UI http://localhost:8025 | SMTP :1025"
 fi
 
@@ -557,7 +557,6 @@ if [ "$WITH_MYSQL" = 1 ];    then VERIFY_SERVICES+=("${MYSQL_SERVICE:-mysqld}");
 if [ "$WITH_POSTGRES" = 1 ]; then VERIFY_SERVICES+=(postgresql); fi
 if [ "$WITH_DOCKER" = 1 ];   then VERIFY_SERVICES+=(docker); fi
 if [ "$WITH_REDIS" = 1 ];    then VERIFY_SERVICES+=(redis); fi
-if [ "$WITH_MAILPIT" = 1 ];  then VERIFY_SERVICES+=(mailpit); fi
 part verify.sh "${VERIFY_SERVICES[@]}"
 
 # ── RIEPILOGO FINALE ─────────────────────────

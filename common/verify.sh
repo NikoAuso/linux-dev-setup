@@ -87,6 +87,15 @@ check_if "${WITH_POSTGRES:-1}"  psql --version
 check_if "${WITH_REDIS:-1}"     redis-cli --version
 check_if "${WITH_DOCKER:-1}"    docker --version
 check_if "${WITH_MAILPIT:-1}"   mailpit version
+# Mailpit gira come servizio utente, non di sistema: va interrogato con --user.
+if [ "${WITH_MAILPIT:-1}" = 1 ]; then
+    if systemctl --user is-active --quiet mailpit; then
+        ok "servizio utente attivo: mailpit"
+    else
+        info "servizio utente NON attivo: mailpit"
+        FAIL=1
+    fi
+fi
 check_if "${WITH_VSCODE:-1}"    code --version
 check_if "${WITH_ACT:-1}"       act --version
 

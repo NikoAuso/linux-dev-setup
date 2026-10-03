@@ -1,15 +1,14 @@
 #!/bin/bash
 
-# ── Mailpit + servizio systemd (cross-distro) ─
-# $1 = gruppo di sistema del servizio (Ubuntu: nogroup, Fedora: nobody).
-# Esegui con: bash mailpit.sh [gruppo]
+# ── Mailpit + servizio systemd utente (cross-distro) ─
+# Gira come servizio utente, non di sistema: un solo Mailpit per utente,
+# avviato con la sessione (linger per farlo partire anche al boot).
+# Esegui con: bash mailpit.sh
 
 set -euo pipefail
 PART_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib.sh
 source "$PART_DIR/lib.sh"
-
-GROUP="${1:-nobody}"
 
 step "Mailpit (email testing locale)"
 # Scarica il binario dalla release taggata invece di eseguire come root uno
@@ -26,8 +25,10 @@ if ! command -v mailpit &>/dev/null; then
     rm -f /tmp/mailpit.tar.gz /tmp/mailpit
 fi
 
-# Crea il servizio systemd per avviarlo automaticamente
-sudo tee /etc/systemd/system/mailpit.service > /dev/null << EOF
+# Servizio systemd utente: un unico Mailpit per utente, nessun processo di
+# sistema che possa entrare in conflitto sulla porta con quello della sessione.
+mkdir -p "$HOME/.config/systemd/user"
+tee "$HOME/.config/systemd/user/mailpit.service" > /dev/null << 'EOF'
 [Unit]
 Description=Mailpit - Email testing tool
 After=network.target
@@ -37,13 +38,13 @@ After=network.target
 # (0.0.0.0), esponendo su LAN la UI con tutte le mail e un relay SMTP aperto.
 ExecStart=/usr/local/bin/mailpit --listen 127.0.0.1:8025 --smtp 127.0.0.1:1025
 Restart=always
-User=nobody
-Group=${GROUP}
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=default.target
 EOF
 
-sudo systemctl daemon-reload
-sudo systemctl enable --now mailpit
+systemctl --user daemon-reload
+systemctl --user enable --now mailpit
+# Linger: fa partire il servizio utente al boot, non solo al primo login.
+loginctl enable-linger "$USER" >/dev/null 2>&1 || true
 ok "Mailpit installato — UI su http://localhost:8025 | SMTP su porta 1025"
