@@ -31,6 +31,7 @@ in modo **idempotente** (rilanciabile senza rompere nulla).
 **Strumenti da terminale**
 - Starship prompt + Tmux + Nerd Font (JetBrainsMono)
 - bat, eza, fzf, ripgrep, fd, jq, httpie, lazygit, git-delta, shellcheck
+- gitleaks con hook pre-commit globale (`core.hooksPath`): blocca i commit che contengono segreti
 - direnv, mkcert (HTTPS locale), GitHub CLI (`gh`), act (GitHub Actions in locale)
 - `mycli` / `pgcli` via pipx (solo se il database corrispondente è attivo)
 - Alias per git, Docker, Laravel e i tool moderni
@@ -123,6 +124,7 @@ common/                # logica condivisa tra le due distro
 ├── mailpit.sh         # Mailpit + servizio systemd
 ├── mkcert.sh          # certificati HTTPS locali
 ├── lazygit.sh         # lazygit dall'ultima release
+├── gitleaks.sh        # gitleaks + hook pre-commit globale anti-segreti
 ├── act.sh             # act (GitHub Actions in locale)
 ├── setup-terminal.sh  # Starship + Tmux + Nerd Font
 ├── vscode-extensions.sh

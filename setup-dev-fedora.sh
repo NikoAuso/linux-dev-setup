@@ -365,6 +365,7 @@ sudo dnf install -y \
     ShellCheck
 
 part lazygit.sh
+part gitleaks.sh
 
 # Configura fzf nel .bashrc
 if ! grep -q "fzf" "$HOME/.bashrc"; then
@@ -374,8 +375,8 @@ fi
 
 part cli-aliases.sh
 
-ok "bat, eza, fzf, ripgrep, fd, jq, httpie, lazygit, git-delta, shellcheck installati"
-done_item "bat, eza, fzf, ripgrep, fd, jq, httpie, lazygit, git-delta, shellcheck"
+ok "bat, eza, fzf, ripgrep, fd, jq, httpie, lazygit, gitleaks, git-delta, shellcheck installati"
+done_item "bat, eza, fzf, ripgrep, fd, jq, httpie, lazygit, gitleaks (hook pre-commit), git-delta, shellcheck"
 
 if [ "$WITH_ACT" = 1 ]; then
     part act.sh

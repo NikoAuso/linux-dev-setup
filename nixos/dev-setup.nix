@@ -83,7 +83,7 @@ in
     jdk
 
     # tool CLI moderni  — nomi dei comandi già corretti su Nix
-    bat eza fzf ripgrep fd jq httpie lazygit delta shellcheck
+    bat eza fzf ripgrep fd jq httpie lazygit gitleaks delta shellcheck
     direnv mkcert gh act tmux git-filter-repo
 
     # desktop  — blocco 'desktop' (commenta la riga per escluderli)

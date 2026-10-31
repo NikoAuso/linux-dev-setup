@@ -68,6 +68,7 @@ check mkcert -version
 check direnv --version
 check shellcheck --version
 check lazygit --version
+check gitleaks version
 
 # ── Opzionali (seguono i flag WITH_*) ─────────
 check_if "${WITH_TERMINAL:-1}"  starship --version
